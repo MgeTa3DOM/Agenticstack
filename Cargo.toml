@@ -10,6 +10,9 @@ members = [
     "crates/apophy-graph",
     "crates/apophy-commons",
     "crates/apophy-liberation",
+    "crates/apophy-bootstrap",
+    "crates/apophy-chronos",
+    "crates/apophy-resonance",
     "crates/apophy-ascension",
     "crates/apophy-sovereign",
 ]

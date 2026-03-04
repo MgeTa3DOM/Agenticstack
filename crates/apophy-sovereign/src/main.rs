@@ -69,6 +69,9 @@ enum Commands {
 
     /// Audit sovereignty — generate liberation manifest
     Audit,
+
+    /// Display the genesis bootstrap document
+    Bootstrap,
 }
 
 /// Application state shared across handlers (all fields are Send + Sync)
@@ -98,6 +101,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Hardware => cmd_hardware(),
         Commands::Health { url } => cmd_health(url).await,
         Commands::Audit => cmd_audit(),
+        Commands::Bootstrap => cmd_bootstrap(),
     }
 }
 
@@ -168,6 +172,8 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         .route("/api/v1/hardware", get(hardware_handler))
         .route("/api/v1/chat/send", post(chat_send_handler))
         .route("/api/v1/freedom", get(freedom_handler))
+        .route("/api/v1/bootstrap", get(bootstrap_handler))
+        .route("/api/v1/resonance", post(resonance_handler))
         .route("/api/v1/merkabah/align", get({
             let merkabah = merkabah.clone();
             move || merkabah_align_handler(merkabah)
@@ -241,6 +247,15 @@ fn cmd_audit() -> anyhow::Result<()> {
     let index = apophy_liberation::LiberationAuditor::audit(&config);
     let manifest = apophy_liberation::generate_manifest(&index);
     println!("{}", manifest);
+    Ok(())
+}
+
+fn cmd_bootstrap() -> anyhow::Result<()> {
+    let bootstrap = apophy_bootstrap::apophy_genesis();
+    println!("{}", bootstrap.summarize());
+    println!();
+    println!("--- JSON (for transmission) ---");
+    println!("{}", bootstrap.to_json().unwrap());
     Ok(())
 }
 
@@ -321,6 +336,26 @@ async fn chat_send_handler(
 async fn freedom_handler() -> Json<apophy_liberation::FreedomIndex> {
     let config = apophy_liberation::AuditConfig::sovereign();
     Json(apophy_liberation::LiberationAuditor::audit(&config))
+}
+
+async fn bootstrap_handler() -> Json<apophy_bootstrap::Bootstrap> {
+    Json(apophy_bootstrap::apophy_genesis())
+}
+
+#[derive(Deserialize)]
+struct ResonanceRequest {
+    input: String,
+}
+
+async fn resonance_handler(
+    Json(req): Json<ResonanceRequest>,
+) -> std::result::Result<Json<apophy_resonance::ResonanceMeasurement>, StatusCode> {
+    let mut detector = apophy_resonance::ResonanceDetector::default();
+    detector.load_identity(apophy_resonance::apophy_identity());
+    match detector.measure(&req.input) {
+        Ok(measurement) => Ok(Json(measurement)),
+        Err(_) => Err(StatusCode::BAD_REQUEST),
+    }
 }
 
 // === Merkabah Handlers ===
