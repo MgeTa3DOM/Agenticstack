@@ -17,6 +17,9 @@ apophy-dream = { path = "../apophy-dream" }
 apophy-pineal = { path = "../apophy-pineal" }
 apophy-memory = { path = "../apophy-memory" }
 apophy-ascension = { path = "../apophy-ascension" }
+apophy-graph = { path = "../apophy-graph" }
+apophy-commons = { path = "../apophy-commons" }
+apophy-liberation = { path = "../apophy-liberation" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -66,6 +66,9 @@ enum Commands {
         #[arg(short, long, default_value = "http://localhost:8080")]
         url: String,
     },
+
+    /// Audit sovereignty — generate liberation manifest
+    Audit,
 }
 
 /// Application state shared across handlers (all fields are Send + Sync)
@@ -94,6 +97,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Keygen { output } => cmd_keygen(output),
         Commands::Hardware => cmd_hardware(),
         Commands::Health { url } => cmd_health(url).await,
+        Commands::Audit => cmd_audit(),
     }
 }
 
@@ -152,11 +156,18 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         );
     }
 
+    // Liberation audit at startup
+    let freedom = apophy_liberation::LiberationAuditor::audit(
+        &apophy_liberation::AuditConfig::sovereign(),
+    );
+    tracing::info!("Freedom Score: {}/100 (sovereign: {})", freedom.score, freedom.sovereign);
+
     let app = Router::new()
         .route("/health", get(health_handler))
         .route("/api/v1/info", get(info_handler))
         .route("/api/v1/hardware", get(hardware_handler))
         .route("/api/v1/chat/send", post(chat_send_handler))
+        .route("/api/v1/freedom", get(freedom_handler))
         .route("/api/v1/merkabah/align", get({
             let merkabah = merkabah.clone();
             move || merkabah_align_handler(merkabah)
@@ -222,6 +233,14 @@ async fn cmd_health(url: String) -> anyhow::Result<()> {
     } else {
         println!("Server unhealthy: HTTP {}", resp.status());
     }
+    Ok(())
+}
+
+fn cmd_audit() -> anyhow::Result<()> {
+    let config = apophy_liberation::AuditConfig::sovereign();
+    let index = apophy_liberation::LiberationAuditor::audit(&config);
+    let manifest = apophy_liberation::generate_manifest(&index);
+    println!("{}", manifest);
     Ok(())
 }
 
@@ -297,6 +316,11 @@ async fn chat_send_handler(
         encrypted: true,
         status: "queued".to_string(),
     }))
+}
+
+async fn freedom_handler() -> Json<apophy_liberation::FreedomIndex> {
+    let config = apophy_liberation::AuditConfig::sovereign();
+    Json(apophy_liberation::LiberationAuditor::audit(&config))
 }
 
 // === Merkabah Handlers ===

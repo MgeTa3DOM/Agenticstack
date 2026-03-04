@@ -7,6 +7,9 @@ members = [
     "crates/apophy-dream",
     "crates/apophy-pineal",
     "crates/apophy-memory",
+    "crates/apophy-graph",
+    "crates/apophy-commons",
+    "crates/apophy-liberation",
     "crates/apophy-ascension",
     "crates/apophy-sovereign",
 ]
