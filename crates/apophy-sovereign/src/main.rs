@@ -75,6 +75,12 @@ enum Commands {
 
     /// Run security fortress scan
     Fortress,
+
+    /// Show agent harness status (domain memory)
+    Harness,
+
+    /// Bootstrap sovereign infrastructure backlog
+    HarnessInit,
 }
 
 /// Application state shared across handlers (all fields are Send + Sync)
@@ -106,6 +112,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Audit => cmd_audit(),
         Commands::Bootstrap => cmd_bootstrap(),
         Commands::Fortress => cmd_fortress(),
+        Commands::Harness => cmd_harness(),
+        Commands::HarnessInit => cmd_harness_init(),
     }
 }
 
@@ -179,6 +187,8 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         .route("/api/v1/bootstrap", get(bootstrap_handler))
         .route("/api/v1/resonance", post(resonance_handler))
         .route("/api/v1/fortress", get(fortress_handler))
+        .route("/api/v1/harness", get(harness_handler))
+        .route("/api/v1/harness/init", post(harness_init_handler))
         .route("/api/v1/merkabah/align", get({
             let merkabah = merkabah.clone();
             move || merkabah_align_handler(merkabah)
@@ -277,6 +287,22 @@ fn cmd_fortress() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn cmd_harness() -> anyhow::Result<()> {
+    let harness = apophy_harness::Harness::new(apophy_harness::HarnessConfig::default());
+    println!("{}", harness.status()?);
+    Ok(())
+}
+
+fn cmd_harness_init() -> anyhow::Result<()> {
+    let harness = apophy_harness::Harness::new(apophy_harness::HarnessConfig::default());
+    let memory = harness.bootstrap_sovereign()?;
+    println!("{}", memory.summarize());
+    println!();
+    println!("Domain memory persisted to: {:?}", harness.memory_path());
+    println!("{}", serde_json::to_string_pretty(&memory)?);
+    Ok(())
+}
+
 // === HTTP Handlers ===
 
 #[derive(Serialize)]
@@ -359,6 +385,23 @@ async fn freedom_handler() -> Json<apophy_liberation::FreedomIndex> {
 async fn fortress_handler() -> Json<apophy_fortress::FortressReport> {
     let scanner = apophy_fortress::FortressScanner::new("apophy-sovereign");
     Json(scanner.scan())
+}
+
+async fn harness_handler() -> std::result::Result<Json<serde_json::Value>, StatusCode> {
+    let harness = apophy_harness::Harness::new(apophy_harness::HarnessConfig::default());
+    match harness.load_memory() {
+        Ok(Some(memory)) => Ok(Json(serde_json::to_value(memory).unwrap())),
+        Ok(None) => Ok(Json(serde_json::json!({"status": "not_initialized", "hint": "POST /api/v1/harness/init"}))),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn harness_init_handler() -> std::result::Result<Json<apophy_harness::DomainMemory>, StatusCode> {
+    let harness = apophy_harness::Harness::new(apophy_harness::HarnessConfig::default());
+    match harness.bootstrap_sovereign() {
+        Ok(memory) => Ok(Json(memory)),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
 }
 
 async fn bootstrap_handler() -> Json<apophy_bootstrap::Bootstrap> {

@@ -14,6 +14,7 @@ members = [
     "crates/apophy-chronos",
     "crates/apophy-resonance",
     "crates/apophy-fortress",
+    "crates/apophy-harness",
     "crates/apophy-ascension",
     "crates/apophy-sovereign",
 ]
