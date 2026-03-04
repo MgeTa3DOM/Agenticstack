@@ -18,6 +18,7 @@ members = [
     "crates/apophy-browser",
     "crates/apophy-ascension",
     "crates/apophy-sovereign",
+    "crates/apophy-governance",
 ]
 
 [workspace.package]
@@ -72,6 +73,9 @@ uuid = { version = "1", features = ["v4", "serde"] }
 
 # URL parsing
 url = "2.5"
+
+# Regex
+regex = "1"
 
 # Testing
 tempfile = "3"
