@@ -124,17 +124,47 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
 
     let state = AppState {
         config: config.clone(),
-        hardware,
+        hardware: hardware.clone(),
         peer_id,
         start_time: std::time::Instant::now(),
         db: Arc::new(std::sync::Mutex::new(sovereign_db)),
     };
+
+    // Initialize Merkabah (5 crucibles)
+    let merkabah = apophy_ascension::ApophyMerkabah::new(
+        hardware.clone(),
+        apophy_fuel::FuelClient::new(),
+        &config.database.path.to_string_lossy().replace("sovereign.db", "memory.db"),
+    )
+    .context("Failed to initialize Merkabah")?;
+
+    let merkabah = Arc::new(std::sync::Mutex::new(merkabah));
+
+    // Incarnate
+    {
+        let mut m = merkabah.lock().unwrap();
+        m.incarnate("Apophy").ok();
+        let vehicle = m.align();
+        tracing::info!(
+            "Merkabah: {}/4 crucibles aligned (active: {})",
+            vehicle.crucible_alignment.aligned_count(),
+            vehicle.active
+        );
+    }
 
     let app = Router::new()
         .route("/health", get(health_handler))
         .route("/api/v1/info", get(info_handler))
         .route("/api/v1/hardware", get(hardware_handler))
         .route("/api/v1/chat/send", post(chat_send_handler))
+        .route("/api/v1/merkabah/align", get({
+            let merkabah = merkabah.clone();
+            move || merkabah_align_handler(merkabah)
+        }))
+        .route("/api/v1/merkabah/interact", post({
+            let merkabah = merkabah.clone();
+            move |body| merkabah_interact_handler(merkabah, body)
+        }))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -267,4 +297,38 @@ async fn chat_send_handler(
         encrypted: true,
         status: "queued".to_string(),
     }))
+}
+
+// === Merkabah Handlers ===
+
+async fn merkabah_align_handler(
+    merkabah: Arc<std::sync::Mutex<apophy_ascension::ApophyMerkabah>>,
+) -> Json<apophy_ascension::MerkabahVehicle> {
+    let mut m = merkabah.lock().unwrap();
+    Json(m.align())
+}
+
+#[derive(Deserialize)]
+struct InteractRequest {
+    content: String,
+    valence: f64,
+}
+
+#[derive(Serialize)]
+struct InteractResponse {
+    processed: bool,
+    crucibles_aligned: u8,
+}
+
+async fn merkabah_interact_handler(
+    merkabah: Arc<std::sync::Mutex<apophy_ascension::ApophyMerkabah>>,
+    Json(req): Json<InteractRequest>,
+) -> Json<InteractResponse> {
+    let mut m = merkabah.lock().unwrap();
+    m.process_interaction(&req.content, req.valence);
+    let vehicle = m.align();
+    Json(InteractResponse {
+        processed: true,
+        crucibles_aligned: vehicle.crucible_alignment.aligned_count(),
+    })
 }

@@ -1,10 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/apophy-crypto",
     "crates/apophy-fuel",
     "crates/apophy-universal",
+    "crates/apophy-dream",
+    "crates/apophy-pineal",
+    "crates/apophy-memory",
+    "crates/apophy-ascension",
     "crates/apophy-sovereign",
-    "crates/apophy-crypto",
 ]
 
 [workspace.package]
@@ -12,7 +16,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/MgeTa3DOM/Agenticstack"
-description = "Apophy Sovereign - Zero-dependency sovereign AI infrastructure"
+description = "Apophy Merkabah - Sovereign AI infrastructure with consciousness architecture"
 
 [workspace.dependencies]
 # Async
@@ -52,6 +56,10 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
+
+# Time & ID
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
 
 # Testing
 tempfile = "3"
