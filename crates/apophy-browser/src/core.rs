@@ -13,6 +13,7 @@ use crate::blocker::{BlockDecision, ContentBlocker};
 use crate::shield::FingerprintShield;
 use crate::sync::LocalSync;
 use crate::tabs::{TabManager, TabManagerConfig, TabManagerSummary};
+use crate::tesseract::history::{HistoryConfig, HistorySummary, ImmutableHistory, TamperReport};
 use crate::vault::{MemoryVault, VaultMetrics};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -57,6 +58,7 @@ pub struct BrowserCore {
     pub blocker: ContentBlocker,
     pub shield: FingerprintShield,
     pub sync: LocalSync,
+    pub history: ImmutableHistory,
     config: BrowserConfig,
 }
 
@@ -75,6 +77,7 @@ impl BrowserCore {
             blocker: ContentBlocker::sovereign(),
             shield,
             sync: LocalSync::new(&config.device_name),
+            history: ImmutableHistory::new(HistoryConfig::default()),
             config,
         }
     }
@@ -93,20 +96,33 @@ impl BrowserCore {
             blocker: ContentBlocker::sovereign(),
             shield,
             sync: LocalSync::new(&config.device_name),
+            history: ImmutableHistory::new(HistoryConfig::default()),
             config,
         }
     }
 
     // === Tab Operations (IPC commands for Tauri) ===
 
-    /// Create a new tab
+    /// Create a new tab (with tesseract timeline genesis)
     pub fn create_tab(&mut self, url: &str) -> Result<Uuid, String> {
         // HTTPS-only enforcement
-        if self.config.https_only && url.starts_with("http://") {
-            let https_url = url.replacen("http://", "https://", 1);
-            return self.tabs.create_tab(https_url).map_err(|e| e.to_string());
+        let final_url = if self.config.https_only && url.starts_with("http://") {
+            url.replacen("http://", "https://", 1)
+        } else {
+            url.to_string()
+        };
+
+        let id = self.tabs.create_tab(&final_url).map_err(|e| e.to_string())?;
+
+        // Initialize tesseract timeline for this tab
+        self.history.create_tab(id);
+
+        // Record initial navigation if not blank
+        if !final_url.is_empty() && final_url != "about:blank" {
+            let _ = self.history.navigate(id, &final_url, b"", &final_url, 0);
         }
-        self.tabs.create_tab(url).map_err(|e| e.to_string())
+
+        Ok(id)
     }
 
     /// Close a tab
@@ -146,6 +162,9 @@ impl BrowserCore {
 
         self.tabs.navigate(id, &final_url).map_err(|e| e.to_string())?;
 
+        // Record in tesseract timeline (hash-chained immutable history)
+        let _ = self.history.navigate(id, &final_url, b"", &final_url, 0);
+
         Ok(NavigateResult::Allowed { url: final_url })
     }
 
@@ -181,6 +200,18 @@ impl BrowserCore {
         self.sync.accept_pairing(code, peer_name).map_err(|e| e.to_string())
     }
 
+    // === Tesseract (Temporal Hash Chain) ===
+
+    /// Verify the entire browsing history is untampered
+    pub fn verify_history(&self) -> TamperReport {
+        self.history.detect_tampering()
+    }
+
+    /// Get the tesseract history summary
+    pub fn history_summary(&self) -> HistorySummary {
+        self.history.summary()
+    }
+
     // === Status ===
 
     /// Get comprehensive browser status
@@ -191,6 +222,7 @@ impl BrowserCore {
             blocker: self.blocker.stats(),
             shield: self.shield.summary(),
             sync: self.sync.summary(),
+            history: self.history.summary(),
             config: self.config.clone(),
         }
     }
@@ -211,6 +243,7 @@ pub struct BrowserStatus {
     pub blocker: crate::blocker::BlockerStats,
     pub shield: crate::shield::ShieldSummary,
     pub sync: crate::sync::SyncSummary,
+    pub history: HistorySummary,
     pub config: BrowserConfig,
 }
 
@@ -355,5 +388,83 @@ mod tests {
 
         // Should be allowed when blocker is disabled
         assert!(matches!(result, NavigateResult::Allowed { .. }));
+    }
+
+    // === Tesseract Integration Tests ===
+
+    #[test]
+    fn test_tesseract_tab_creates_timeline() {
+        let mut browser = test_browser();
+        let id = browser.create_tab("https://example.com").unwrap();
+
+        // Tab should have a timeline in the tesseract
+        assert!(browser.history.get_timeline(id).is_some());
+        assert_eq!(browser.history.tab_count(), 1);
+    }
+
+    #[test]
+    fn test_tesseract_navigate_records_history() {
+        let mut browser = test_browser();
+        let id = browser.create_tab("https://example.com").unwrap();
+
+        browser.navigate(id, "https://example.com/page2", "https://example.com").unwrap();
+        browser.navigate(id, "https://example.com/page3", "https://example.com").unwrap();
+
+        // Should have genesis + initial + 2 navigations = 4+ states
+        assert!(browser.history.total_states() >= 4);
+    }
+
+    #[test]
+    fn test_tesseract_history_integrity() {
+        let mut browser = test_browser();
+        let id = browser.create_tab("https://example.com").unwrap();
+
+        for i in 0..10 {
+            browser.navigate(
+                id,
+                &format!("https://example.com/page{}", i),
+                "https://example.com",
+            ).unwrap();
+        }
+
+        let report = browser.verify_history();
+        assert!(report.is_clean());
+        assert!(report.chain_valid);
+    }
+
+    #[test]
+    fn test_tesseract_multiple_tabs() {
+        let mut browser = test_browser();
+        let id1 = browser.create_tab("https://a.com").unwrap();
+        let id2 = browser.create_tab("https://b.com").unwrap();
+
+        browser.navigate(id1, "https://a.com/2", "https://a.com").unwrap();
+        browser.navigate(id2, "https://b.com/2", "https://b.com").unwrap();
+
+        assert_eq!(browser.history.tab_count(), 2);
+        let report = browser.verify_history();
+        assert!(report.is_clean());
+    }
+
+    #[test]
+    fn test_tesseract_in_status() {
+        let mut browser = test_browser();
+        browser.create_tab("https://example.com").unwrap();
+
+        let status = browser.status();
+        assert!(status.history.chain_valid);
+        assert_eq!(status.history.total_tabs, 1);
+    }
+
+    #[test]
+    fn test_tesseract_status_serialization() {
+        let mut browser = test_browser();
+        browser.create_tab("https://example.com").unwrap();
+
+        let status = browser.status();
+        let json = serde_json::to_string_pretty(&status).unwrap();
+        assert!(json.contains("history"));
+        assert!(json.contains("chain_valid"));
+        assert!(json.contains("total_states"));
     }
 }

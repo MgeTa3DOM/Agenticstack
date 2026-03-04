@@ -15,12 +15,15 @@
 //! 4. **Zero-cloud sync**: Noise Protocol over mDNS. No Google, no Mozilla,
 //!    no Microsoft. Your data stays on your LAN.
 //! 5. **Fingerprint mitigations**: 23 techniques to prevent tracking.
+//! 6. **Tesseract Tachionique**: Hash-chained temporal navigation.
+//!    Past/present/future as Merkle-verified timeline. Immutable personal ledger.
 
 pub mod vault;
 pub mod tabs;
 pub mod blocker;
 pub mod shield;
 pub mod sync;
+pub mod tesseract;
 pub mod core;
 
 pub use vault::MemoryVault;
@@ -28,4 +31,5 @@ pub use tabs::{Tab, TabManager, TabState};
 pub use blocker::{ContentBlocker, BlockRule, BlockDecision};
 pub use shield::{FingerprintShield, Mitigation};
 pub use sync::{LocalSync, SyncPeer, PairingState};
+pub use tesseract::{ImmutableHistory, MerkleTimeline, Timeline};
 pub use core::BrowserCore;
