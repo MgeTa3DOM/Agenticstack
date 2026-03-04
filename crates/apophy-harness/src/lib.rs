@@ -32,6 +32,9 @@ pub mod domain;
 pub mod initializer;
 pub mod worker;
 pub mod harness;
+pub mod blueprint;
+pub mod toolshed;
+pub mod sandbox;
 
 // Explicit re-exports to avoid ambiguous glob conflicts (domain::Result vs harness::Result)
 pub use domain::{
@@ -42,3 +45,15 @@ pub use domain::{
 pub use initializer::{FeatureSpec, Initializer};
 pub use worker::{FeatureExecutor, TestRunner, Worker, WorkerResult};
 pub use harness::{Harness, HarnessConfig};
+pub use blueprint::{
+    Blueprint, BlueprintContext, BlueprintResult, BlueprintRunner, BlueprintStep,
+    StepKind, StepOutcome, AgentBackend, AgentResponse,
+};
+pub use toolshed::{
+    Toolshed, ToolDefinition, ToolSelection, ToolHandler, ToolInvocation,
+    PermissionLevel, ToolshedSummary,
+};
+pub use sandbox::{
+    Sandbox, SandboxConfig, SandboxManager, SandboxManagerSummary,
+    SandboxState, ResourceUsage,
+};
