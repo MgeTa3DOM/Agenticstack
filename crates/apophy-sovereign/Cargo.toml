@@ -25,6 +25,8 @@ apophy-chronos = { path = "../apophy-chronos" }
 apophy-resonance = { path = "../apophy-resonance" }
 apophy-fortress = { path = "../apophy-fortress" }
 apophy-harness = { path = "../apophy-harness" }
+apophy-browser = { path = "../apophy-browser" }
+apophy-governance = { path = "../apophy-governance" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

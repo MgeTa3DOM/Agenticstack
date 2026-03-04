@@ -173,7 +173,7 @@ pub struct FuelClient {
     peer_id: PeerId,
     sessions: Arc<RwLock<HashMap<PeerId, SessionState>>>,
     groups: Arc<RwLock<HashMap<String, FuelGroup>>>,
-    inbox: mpsc::Receiver<FuelMessage>,
+    _inbox: mpsc::Receiver<FuelMessage>,
     inbox_sender: mpsc::Sender<FuelMessage>,
     outbox: mpsc::Sender<EncryptedEnvelope>,
     outbox_receiver: Option<mpsc::Receiver<EncryptedEnvelope>>,
@@ -181,7 +181,7 @@ pub struct FuelClient {
 
 struct SessionState {
     ratchet: RatchetSession,
-    peer_x25519_public: [u8; 32],
+    _peer_x25519_public: [u8; 32],
 }
 
 impl FuelClient {
@@ -201,7 +201,7 @@ impl FuelClient {
             peer_id,
             sessions: Arc::new(RwLock::new(HashMap::new())),
             groups: Arc::new(RwLock::new(HashMap::new())),
-            inbox: inbox_rx,
+            _inbox: inbox_rx,
             inbox_sender: inbox_tx,
             outbox: outbox_tx,
             outbox_receiver: Some(outbox_rx),
@@ -231,7 +231,7 @@ impl FuelClient {
 
         let state = SessionState {
             ratchet,
-            peer_x25519_public,
+            _peer_x25519_public: peer_x25519_public,
         };
 
         self.sessions.write().await.insert(peer_id.clone(), state);

@@ -33,7 +33,12 @@ pub mod initializer;
 pub mod worker;
 pub mod harness;
 
-pub use domain::*;
-pub use initializer::*;
-pub use worker::*;
-pub use harness::*;
+// Explicit re-exports to avoid ambiguous glob conflicts (domain::Result vs harness::Result)
+pub use domain::{
+    DomainMemory, Feature, FeatureBacklog, FeatureStatus, FailedApproach,
+    ScaffoldingRules, SystemState, TestCommand, TestSnapshot, WorkerRunLog,
+    RunOutcome, ProgressLog,
+};
+pub use initializer::{FeatureSpec, Initializer};
+pub use worker::{FeatureExecutor, TestRunner, Worker, WorkerResult};
+pub use harness::{Harness, HarnessConfig};

@@ -81,11 +81,18 @@ enum Commands {
 
     /// Bootstrap sovereign infrastructure backlog
     HarnessInit,
+
+    /// Run sovereign governance audit (attack surface + maturity level)
+    Governance,
+
+    /// Show browser status (vault, tabs, blocker, shield, tesseract)
+    Browser,
 }
 
 /// Application state shared across handlers (all fields are Send + Sync)
 #[derive(Clone)]
 struct AppState {
+    #[allow(dead_code)]
     config: SovereignConfig,
     hardware: apophy_universal::HardwareInfo,
     peer_id: String,
@@ -114,6 +121,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Fortress => cmd_fortress(),
         Commands::Harness => cmd_harness(),
         Commands::HarnessInit => cmd_harness_init(),
+        Commands::Governance => cmd_governance(),
+        Commands::Browser => cmd_browser(),
     }
 }
 
@@ -189,6 +198,9 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         .route("/api/v1/fortress", get(fortress_handler))
         .route("/api/v1/harness", get(harness_handler))
         .route("/api/v1/harness/init", post(harness_init_handler))
+        .route("/api/v1/governance", get(governance_handler))
+        .route("/api/v1/governance/surface", get(governance_surface_handler))
+        .route("/api/v1/browser/status", get(browser_status_handler))
         .route("/api/v1/merkabah/align", get({
             let merkabah = merkabah.clone();
             move || merkabah_align_handler(merkabah)
@@ -300,6 +312,71 @@ fn cmd_harness_init() -> anyhow::Result<()> {
     println!();
     println!("Domain memory persisted to: {:?}", harness.memory_path());
     println!("{}", serde_json::to_string_pretty(&memory)?);
+    Ok(())
+}
+
+fn cmd_governance() -> anyhow::Result<()> {
+    use apophy_governance::{
+        AttackSurfaceAnalyzer, SovereignAuditor,
+        sovereign_audit::ObservabilityMetrics,
+    };
+
+    println!("=== Apophy Sovereign — Audit de Gouvernance ===\n");
+
+    let auditor = SovereignAuditor::new();
+    let profile = AttackSurfaceAnalyzer::sovereign_profile();
+    let obs = ObservabilityMetrics {
+        total_traces: 0,
+        waste_rate: 0.0,
+        budget_consumed_pct: 0.0,
+        total_cost_dollars: 0.0,
+    };
+
+    let report = auditor.audit(&profile, None, None, obs);
+
+    println!("Niveau de Maturité : {} (score: {:.1}%)",
+        report.maturity_level.label_fr(),
+        report.maturity_score * 100.0);
+    println!("Surface d'Attaque  : {:.0}% durci ({})",
+        report.surface_analysis.score * 100.0,
+        if report.surface_analysis.hardened { "HARDENED" } else { "VULNÉRABLE" });
+    println!("Comparaison Clawdbot:");
+    println!("  Apophy  : {:.0}%", report.clawdbot_comparison.apophy_score * 100.0);
+    println!("  Clawdbot: {:.0}%", report.clawdbot_comparison.clawdbot_score * 100.0);
+    println!("  Facteur : {:.1}x meilleur", report.clawdbot_comparison.improvement_factor);
+
+    if !report.recommendations.is_empty() {
+        println!("\nRecommandations:");
+        for rec in &report.recommendations {
+            println!("  [{:?}] {}: {}", rec.priority, rec.category, rec.message_fr);
+        }
+    }
+
+    println!("\n--- JSON ---");
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
+}
+
+fn cmd_browser() -> anyhow::Result<()> {
+    let browser = apophy_browser::BrowserCore::new(apophy_browser::core::BrowserConfig::default());
+    let status = browser.status();
+
+    println!("=== Apophy Sovereign — Browser Status ===\n");
+    println!("Vault       : {} (seal_count={}, bytes_sealed={})",
+        if status.vault.unlocked { "UNLOCKED" } else { "LOCKED" },
+        status.vault.seal_count, status.vault.bytes_sealed);
+    println!("Tabs        : {}/{} actifs, {} suspendus",
+        status.tabs.active, status.tabs.total, status.tabs.suspended);
+    println!("Blocker     : {} règles, {} bloqués",
+        status.blocker.total_rules, status.blocker.total_blocked);
+    println!("Shield      : {} mitigations ({} actives)",
+        status.shield.total_mitigations, status.shield.enabled);
+    println!("Historique  : {} états, {} tabs, {} checkpoints (intègre: {})",
+        status.history.total_states, status.history.total_tabs,
+        status.history.total_checkpoints, status.history.chain_valid);
+
+    println!("\n--- JSON ---");
+    println!("{}", serde_json::to_string_pretty(&status)?);
     Ok(())
 }
 
@@ -422,6 +499,44 @@ async fn resonance_handler(
         Ok(measurement) => Ok(Json(measurement)),
         Err(_) => Err(StatusCode::BAD_REQUEST),
     }
+}
+
+// === Governance Handlers ===
+
+async fn governance_handler(
+    State(state): State<AppState>,
+) -> Json<apophy_governance::SovereignAuditReport> {
+    let auditor = apophy_governance::SovereignAuditor::new();
+    let profile = apophy_governance::AttackSurfaceAnalyzer::sovereign_profile();
+    let obs = apophy_governance::sovereign_audit::ObservabilityMetrics {
+        total_traces: 0,
+        waste_rate: 0.0,
+        budget_consumed_pct: 0.0,
+        total_cost_dollars: 0.0,
+    };
+    let report = auditor.audit(&profile, None, None, obs);
+
+    // Log audit event to sovereign database
+    if let Ok(db) = state.db.lock() {
+        let _ = db.audit_log(
+            "governance_audit",
+            Some("sovereign"),
+            &format!("maturity={:.2} hardened={}", report.maturity_score, report.surface_analysis.hardened),
+        );
+    }
+
+    Json(report)
+}
+
+async fn governance_surface_handler() -> Json<apophy_governance::SurfaceAnalysis> {
+    let analyzer = apophy_governance::AttackSurfaceAnalyzer::new();
+    let profile = apophy_governance::AttackSurfaceAnalyzer::sovereign_profile();
+    Json(analyzer.analyze(&profile))
+}
+
+async fn browser_status_handler() -> Json<apophy_browser::BrowserStatus> {
+    let browser = apophy_browser::BrowserCore::new(apophy_browser::core::BrowserConfig::default());
+    Json(browser.status())
 }
 
 // === Merkabah Handlers ===

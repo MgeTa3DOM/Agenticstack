@@ -171,7 +171,7 @@ impl TransparentGraph {
 
         // Calculate in-degrees
         for node in self.nodes.values() {
-            for dep in &node.dependencies {
+            for _dep in &node.dependencies {
                 // dep → node (dep must execute before node)
                 *in_degree.entry(&node.id).or_insert(0) += 1;
             }

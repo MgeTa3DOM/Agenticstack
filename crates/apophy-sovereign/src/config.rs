@@ -101,6 +101,7 @@ impl SovereignConfig {
         Ok(config)
     }
 
+    #[allow(dead_code)]
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
         let content = toml::to_string_pretty(self)?;
         if let Some(parent) = path.parent() {

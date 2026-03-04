@@ -122,6 +122,7 @@ impl SovereignDb {
     }
 
     /// Register a peer
+    #[allow(dead_code)]
     pub fn register_peer(
         &self,
         id: &str,
@@ -138,6 +139,7 @@ impl SovereignDb {
     }
 
     /// Get peer count
+    #[allow(dead_code)]
     pub fn peer_count(&self) -> Result<u64> {
         let count: u64 = self.conn.query_row(
             "SELECT COUNT(*) FROM peers",

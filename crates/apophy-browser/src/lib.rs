@@ -32,4 +32,4 @@ pub use blocker::{ContentBlocker, BlockRule, BlockDecision};
 pub use shield::{FingerprintShield, Mitigation};
 pub use sync::{LocalSync, SyncPeer, PairingState};
 pub use tesseract::{ImmutableHistory, MerkleTimeline, Timeline};
-pub use core::BrowserCore;
+pub use core::{BrowserCore, BrowserStatus};
