@@ -1,0 +1,17 @@
+[package]
+name = "apophy-fuel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Fuel Protocol - Sovereign E2E encrypted chat replacing WhatsApp/Slack/Teams"
+
+[dependencies]
+apophy-crypto = { path = "../apophy-crypto" }
+tokio = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+x25519-dalek = { workspace = true }

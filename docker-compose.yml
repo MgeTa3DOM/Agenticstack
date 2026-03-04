@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  apophy-sovereign:
+    build: .
+    container_name: apophy-sovereign
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config:/app/config:ro
+      - sovereign-data:/app/data
+      - sovereign-models:/app/models
+      - sovereign-keys:/app/keys
+    environment:
+      - RUST_LOG=apophy_sovereign=info
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+volumes:
+  sovereign-data:
+  sovereign-models:
+  sovereign-keys:

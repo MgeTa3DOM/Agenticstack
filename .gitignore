@@ -172,3 +172,20 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+# Node/Bun
+node_modules/
+bun.lockb
+
+# Apophy
+*.onnx
+*.bin
+*.safetensors
+.apophy/
+*.key
+*.pem
