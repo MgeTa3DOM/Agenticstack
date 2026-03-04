@@ -129,7 +129,49 @@ impl SovereignDb {
             );
 
             CREATE INDEX IF NOT EXISTS idx_webhooks_source ON infra_webhooks(source);
-            CREATE INDEX IF NOT EXISTS idx_webhooks_created ON infra_webhooks(created_at);"
+            CREATE INDEX IF NOT EXISTS idx_webhooks_created ON infra_webhooks(created_at);
+
+            -- Agent fleet tables (Divine Synarchy)
+            CREATE TABLE IF NOT EXISTS agent_fleet (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                tier TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                capabilities TEXT NOT NULL DEFAULT '[]',
+                prompt_template TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'ready',
+                parent_id TEXT,
+                tasks_completed INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            );
+
+            CREATE TABLE IF NOT EXISTS agent_connections (
+                agent_id TEXT NOT NULL,
+                connected_to TEXT NOT NULL,
+                connection_type TEXT NOT NULL DEFAULT 'hierarchy',
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                PRIMARY KEY (agent_id, connected_to),
+                FOREIGN KEY (agent_id) REFERENCES agent_fleet(id),
+                FOREIGN KEY (connected_to) REFERENCES agent_fleet(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS agent_prompts (
+                id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                specialization TEXT,
+                prompt_text TEXT NOT NULL,
+                category TEXT,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                FOREIGN KEY (agent_id) REFERENCES agent_fleet(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_fleet_tier ON agent_fleet(tier);
+            CREATE INDEX IF NOT EXISTS idx_fleet_domain ON agent_fleet(domain);
+            CREATE INDEX IF NOT EXISTS idx_fleet_status ON agent_fleet(status);
+            CREATE INDEX IF NOT EXISTS idx_prompts_agent ON agent_prompts(agent_id);
+            CREATE INDEX IF NOT EXISTS idx_prompts_domain ON agent_prompts(domain);"
         )?;
 
         tracing::info!("Database migrations complete");
@@ -202,6 +244,71 @@ impl SovereignDb {
                 last_status = ?4,
                 updated_at = unixepoch()",
             params![name, service_type, base_url, status],
+        )?;
+        Ok(())
+    }
+
+    // === Agent Fleet Methods ===
+
+    /// Register an agent in the fleet
+    pub fn register_agent(
+        &self,
+        id: &str,
+        name: &str,
+        tier: &str,
+        domain: &str,
+        capabilities_json: &str,
+        prompt_template: &str,
+        parent_id: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO agent_fleet (id, name, tier, domain, capabilities, prompt_template, parent_id, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, unixepoch())",
+            params![id, name, tier, domain, capabilities_json, prompt_template, parent_id],
+        )?;
+        Ok(())
+    }
+
+    /// Add a connection between two agents
+    pub fn add_agent_connection(&self, agent_id: &str, connected_to: &str, connection_type: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO agent_connections (agent_id, connected_to, connection_type)
+             VALUES (?1, ?2, ?3)",
+            params![agent_id, connected_to, connection_type],
+        )?;
+        Ok(())
+    }
+
+    /// Get fleet counts by tier
+    #[allow(dead_code)]
+    pub fn fleet_counts(&self) -> Result<(u64, u64, u64)> {
+        let strategic: u64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM agent_fleet WHERE tier = 'strategic'", [], |row| row.get(0),
+        )?;
+        let tactical: u64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM agent_fleet WHERE tier = 'tactical'", [], |row| row.get(0),
+        )?;
+        let operational: u64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM agent_fleet WHERE tier = 'operational'", [], |row| row.get(0),
+        )?;
+        Ok((strategic, tactical, operational))
+    }
+
+    /// Get total agent count
+    #[allow(dead_code)]
+    pub fn agent_count(&self) -> Result<u64> {
+        let count: u64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM agent_fleet", [], |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    /// Update agent status
+    #[allow(dead_code)]
+    pub fn update_agent_status(&self, id: &str, status: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE agent_fleet SET status = ?2, updated_at = unixepoch() WHERE id = ?1",
+            params![id, status],
         )?;
         Ok(())
     }

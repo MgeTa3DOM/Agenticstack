@@ -77,6 +77,16 @@ enabled = true
 tunnel_name = "apophy-sovereign"
 # tunnel_token_env = "CF_TUNNEL_TOKEN"
 
+# === Agent Fleet — Divine Synarchy ===
+# 3-tier autonomous agent army: Strategic (9), Tactical (~101), Operational (~2720)
+
+[fleet]
+enabled = true
+synarchy_mode = "divine"
+max_agents = 3000
+auto_spawn = true
+domains_enabled = ["startups", "tech", "support", "sales", "hr", "marketing", "ecommerce", "pm", "legal"]
+
 [[infra.cloudflare.routes]]
 hostname = "api.iagenticflow.org"
 service = "http://localhost:8080"

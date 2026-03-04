@@ -11,6 +11,8 @@ pub struct SovereignConfig {
     pub database: DatabaseConfig,
     #[serde(default)]
     pub infra: InfraConfig,
+    #[serde(default)]
+    pub fleet: FleetConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,6 +126,33 @@ pub struct TunnelRoute {
     pub service: String,
 }
 
+// === Agent Fleet Config ===
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FleetConfig {
+    pub enabled: bool,
+    pub synarchy_mode: String,
+    pub max_agents: usize,
+    pub auto_spawn: bool,
+    pub domains_enabled: Vec<String>,
+}
+
+impl Default for FleetConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            synarchy_mode: "divine".to_string(),
+            max_agents: 3000,
+            auto_spawn: true,
+            domains_enabled: vec![
+                "startups".into(), "tech".into(), "support".into(),
+                "sales".into(), "hr".into(), "marketing".into(),
+                "ecommerce".into(), "pm".into(), "legal".into(),
+            ],
+        }
+    }
+}
+
 impl Default for InfraConfig {
     fn default() -> Self {
         Self {
@@ -224,6 +253,7 @@ impl Default for SovereignConfig {
                 path: PathBuf::from("data/sovereign.db"),
             },
             infra: InfraConfig::default(),
+            fleet: FleetConfig::default(),
         }
     }
 }

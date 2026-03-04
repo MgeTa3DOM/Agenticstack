@@ -25,6 +25,7 @@ use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
+mod agents;
 mod config;
 mod db;
 mod infra;
@@ -95,6 +96,16 @@ enum Commands {
         #[arg(short, long, default_value = "config/sovereign.toml")]
         config: PathBuf,
     },
+
+    /// Agent fleet — Divine Synarchy (3000 agents, 9 domains, 3 tiers)
+    Fleet {
+        /// Path to config file
+        #[arg(short, long, default_value = "config/sovereign.toml")]
+        config: PathBuf,
+    },
+
+    /// Show full agent fleet catalog (all dropdown lists)
+    FleetCatalog,
 }
 
 /// Application state shared across handlers (all fields are Send + Sync)
@@ -132,6 +143,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Governance => cmd_governance(),
         Commands::Browser => cmd_browser(),
         Commands::Infra { config } => cmd_infra(config).await,
+        Commands::Fleet { config } => cmd_fleet(config).await,
+        Commands::FleetCatalog => cmd_fleet_catalog(),
     }
 }
 
@@ -215,6 +228,16 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         );
     }
 
+    // Log fleet status
+    if config.fleet.enabled {
+        let summary = agents::build_fleet_summary();
+        tracing::info!(
+            "Fleet: {} agents ({} strategic, {} tactical, {} operational) — Synarchy: {}",
+            summary.total_agents, summary.strategic_count, summary.tactical_count,
+            summary.operational_count, config.fleet.synarchy_mode,
+        );
+    }
+
     let app = Router::new()
         .route("/health", get(health_handler))
         .route("/api/v1/info", get(info_handler))
@@ -232,6 +255,10 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         .route("/api/v1/infra/status", get(infra_status_handler))
         .route("/api/v1/infra/webhook/skool", post(skool_webhook_handler))
         .route("/api/v1/infra/tunnel/routes", get(tunnel_routes_handler))
+        .route("/api/v1/fleet/summary", get(fleet_summary_handler))
+        .route("/api/v1/fleet/catalog", get(fleet_catalog_handler))
+        .route("/api/v1/fleet/spawn", post(fleet_spawn_handler))
+        .route("/api/v1/fleet/domains", get(fleet_domains_handler))
         .route("/api/v1/merkabah/align", get({
             let merkabah = merkabah.clone();
             move || merkabah_align_handler(merkabah)
@@ -695,6 +722,197 @@ async fn cmd_infra(config_path: PathBuf) -> anyhow::Result<()> {
     println!("  AvatarVers:   {}", config.infra.avatarvers.base_url);
     println!("  AgenticFlow:  {}", config.infra.agenticflow.base_url);
     println!("  Gitea:        {} (SSH port {})", config.infra.gitea.base_url, config.infra.gitea.ssh_port);
+
+    Ok(())
+}
+
+// === Merkabah Handlers ===
+
+// === Fleet Handlers ===
+
+async fn fleet_summary_handler() -> Json<agents::FleetSummary> {
+    Json(agents::build_fleet_summary())
+}
+
+async fn fleet_catalog_handler() -> Json<agents::FleetCatalog> {
+    Json(agents::build_fleet_catalog())
+}
+
+async fn fleet_domains_handler() -> Json<Vec<agents::DomainSummary>> {
+    let summary = agents::build_fleet_summary();
+    Json(summary.domains)
+}
+
+#[derive(Deserialize)]
+struct FleetSpawnRequest {
+    domain: Option<String>,
+    tier: Option<String>,
+}
+
+#[derive(Serialize)]
+struct FleetSpawnResponse {
+    spawned: usize,
+    strategic: usize,
+    tactical: usize,
+    message: String,
+}
+
+async fn fleet_spawn_handler(
+    State(state): State<AppState>,
+    Json(req): Json<FleetSpawnRequest>,
+) -> std::result::Result<Json<FleetSpawnResponse>, StatusCode> {
+    if !state.config.fleet.enabled {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    // Generate strategic generals
+    let generals = agents::generate_strategic_agents();
+    let mut tactical_total = 0;
+
+    if let Ok(db) = state.db.lock() {
+        for gen in &generals {
+            let caps = serde_json::to_string(&gen.capabilities).unwrap_or_default();
+            let _ = db.register_agent(
+                &gen.id, &gen.name, "strategic",
+                gen.domain.slug(), &caps, &gen.prompt_template, None,
+            );
+        }
+
+        // Generate tactical agents per domain (filter by request if specified)
+        for domain in agents::AgentDomain::all() {
+            if let Some(ref d) = req.domain {
+                if domain.slug() != d.as_str() {
+                    continue;
+                }
+            }
+            if let Some(ref t) = req.tier {
+                if t != "tactical" && t != "all" {
+                    continue;
+                }
+            }
+
+            let tacticals = agents::generate_tactical_agents(*domain);
+            tactical_total += tacticals.len();
+
+            for tac in &tacticals {
+                let caps = serde_json::to_string(&tac.capabilities).unwrap_or_default();
+                let _ = db.register_agent(
+                    &tac.id, &tac.name, "tactical",
+                    tac.domain.slug(), &caps, &tac.prompt_template,
+                    tac.parent_id.as_deref(),
+                );
+                // Connect to general
+                if let Some(ref parent) = tac.parent_id {
+                    let _ = db.add_agent_connection(&tac.id, parent, "hierarchy");
+                }
+            }
+        }
+
+        let _ = db.audit_log(
+            "fleet_spawn",
+            Some("sovereign"),
+            &format!("spawned {} strategic + {} tactical agents", generals.len(), tactical_total),
+        );
+    }
+
+    let total = generals.len() + tactical_total;
+    tracing::info!("Fleet spawned: {} strategic + {} tactical = {} agents", generals.len(), tactical_total, total);
+
+    Ok(Json(FleetSpawnResponse {
+        spawned: total,
+        strategic: generals.len(),
+        tactical: tactical_total,
+        message: format!("Divine Synarchy: {} agents deployed across {} domains", total, agents::AgentDomain::all().len()),
+    }))
+}
+
+// === Fleet CLI Commands ===
+
+async fn cmd_fleet(config_path: PathBuf) -> anyhow::Result<()> {
+    let config = SovereignConfig::load(&config_path).unwrap_or_else(|_| {
+        tracing::warn!("Config not found, using defaults");
+        SovereignConfig::default()
+    });
+
+    println!("=== Apophy Sovereign — Divine Synarchy Fleet ===\n");
+
+    if !config.fleet.enabled {
+        println!("Agent Fleet: DISABLED");
+        return Ok(());
+    }
+
+    let summary = agents::build_fleet_summary();
+
+    println!("Mode:        {} synarchy", config.fleet.synarchy_mode);
+    println!("Max agents:  {}", config.fleet.max_agents);
+    println!("Auto-spawn:  {}", config.fleet.auto_spawn);
+    println!("Total:       {} agents", summary.total_agents);
+    println!("  Strategic: {} generals (one per domain)", summary.strategic_count);
+    println!("  Tactical:  {} specialists", summary.tactical_count);
+    println!("  Operationnel: {} micro-agents", summary.operational_count);
+    println!();
+
+    println!("{:<25} {:>4} {:>6} {:>6} {:>6}", "DOMAIN", "GEN", "TAC", "OPS", "TOTAL");
+    println!("{}", "-".repeat(55));
+    for d in &summary.domains {
+        println!("{:<25} {:>4} {:>6} {:>6} {:>6}",
+            d.label, 1, d.tactical_count, d.operational_count, d.total);
+    }
+    println!("{}", "-".repeat(55));
+    println!("{:<25} {:>4} {:>6} {:>6} {:>6}",
+        "TOTAL", summary.strategic_count, summary.tactical_count,
+        summary.operational_count, summary.total_agents);
+
+    println!("\nDomains enabled: {}", config.fleet.domains_enabled.join(", "));
+
+    // Show tactical specializations for each domain
+    println!("\n=== Tactical Specializations (listes deroulantes) ===\n");
+    for d in &summary.domains {
+        println!("[{}] {} specialists:", d.label, d.tactical_count);
+        for spec in &d.specializations {
+            println!("  - {} ({} prompts): {}", spec.name, spec.prompt_count, spec.description);
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
+fn cmd_fleet_catalog() -> anyhow::Result<()> {
+    let catalog = agents::build_fleet_catalog();
+
+    println!("=== Apophy Sovereign — Fleet Catalog (toutes les possibilites) ===\n");
+    println!("Total possible agents: {}\n", catalog.total_possible_agents);
+
+    println!("--- TIERS ---");
+    for t in &catalog.tiers {
+        println!("  [Rank {}] {} — {} agents", t.rank, t.label, t.count);
+    }
+
+    println!("\n--- DOMAINS (9) ---");
+    for d in &catalog.domains {
+        println!("  [{}] {} — {} tactical, {} operational",
+            d.slug, d.label, d.tactical_count, d.operational_count);
+    }
+
+    println!("\n--- CAPABILITIES ({}) ---", catalog.capabilities.len());
+    for c in &catalog.capabilities {
+        println!("  - {}", c.label);
+    }
+
+    println!("\n--- STATUSES ---");
+    for s in &catalog.statuses {
+        println!("  [{}] {:?}", s.icon, s.status);
+    }
+
+    println!("\n--- SPECIALIZATIONS ({}) ---", catalog.specializations.len());
+    for spec in &catalog.specializations {
+        println!("  [{}/{}] {} ({} prompts)",
+            spec.domain.slug(), spec.slug, spec.name, spec.prompt_count);
+    }
+
+    println!("\n--- JSON ---");
+    println!("{}", serde_json::to_string_pretty(&catalog)?);
 
     Ok(())
 }
