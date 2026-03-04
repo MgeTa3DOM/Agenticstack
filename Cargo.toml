@@ -15,6 +15,7 @@ members = [
     "crates/apophy-resonance",
     "crates/apophy-fortress",
     "crates/apophy-harness",
+    "crates/apophy-browser",
     "crates/apophy-ascension",
     "crates/apophy-sovereign",
 ]
@@ -68,6 +69,9 @@ clap = { version = "4", features = ["derive"] }
 # Time & ID
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+
+# URL parsing
+url = "2.5"
 
 # Testing
 tempfile = "3"
