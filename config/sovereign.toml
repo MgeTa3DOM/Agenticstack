@@ -32,3 +32,63 @@ audit_log = true
 
 [database]
 path = "data/sovereign.db"
+
+# === Infrastructure Integration ===
+# Self-financing ecosystem: Skool + AvatarVers + iAgenticFlow + Infomaniak + Gitea + Cloudflare
+
+[infra]
+enabled = true
+
+[infra.skool]
+enabled = true
+base_url = "https://www.skool.com"
+community_slug = "avatarvers"
+# webhook_secret = "sk_your_webhook_secret"
+
+[infra.avatarvers]
+enabled = true
+base_url = "https://avatarvers.com"
+
+[infra.agenticflow]
+enabled = true
+base_url = "https://iagenticflow.org"
+
+[infra.infomaniak]
+enabled = true
+base_url = "https://api.infomaniak.com"
+# api_key_env = "INFOMANIAK_API_KEY"
+
+[infra.email]
+enabled = true
+smtp_host = "mail.infomaniak.com"
+smtp_port = 587
+from_address = "agent@iagenticflow.org"
+from_name = "Apophy Sovereign"
+use_tls = true
+
+[infra.gitea]
+enabled = true
+base_url = "http://localhost:3000"
+ssh_port = 2222
+domain = "git.iagenticflow.org"
+
+[infra.cloudflare]
+enabled = true
+tunnel_name = "apophy-sovereign"
+# tunnel_token_env = "CF_TUNNEL_TOKEN"
+
+[[infra.cloudflare.routes]]
+hostname = "api.iagenticflow.org"
+service = "http://localhost:8080"
+
+[[infra.cloudflare.routes]]
+hostname = "iagenticflow.org"
+service = "http://localhost:8080"
+
+[[infra.cloudflare.routes]]
+hostname = "git.iagenticflow.org"
+service = "http://localhost:3000"
+
+[[infra.cloudflare.routes]]
+hostname = "avatarvers.com"
+service = "http://localhost:8080"

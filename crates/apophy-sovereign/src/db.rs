@@ -105,7 +105,31 @@ impl SovereignDb {
             CREATE INDEX IF NOT EXISTS idx_messages_recipient ON messages(recipient_id);
             CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
             CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
-            CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status);"
+            CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status);
+
+            -- Infrastructure integration tables
+            CREATE TABLE IF NOT EXISTS infra_services (
+                name TEXT PRIMARY KEY,
+                service_type TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                last_health_check INTEGER,
+                last_status TEXT DEFAULT 'unknown',
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            );
+
+            CREATE TABLE IF NOT EXISTS infra_webhooks (
+                id TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                processed INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch())
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_webhooks_source ON infra_webhooks(source);
+            CREATE INDEX IF NOT EXISTS idx_webhooks_created ON infra_webhooks(created_at);"
         )?;
 
         tracing::info!("Database migrations complete");
@@ -143,6 +167,49 @@ impl SovereignDb {
     pub fn peer_count(&self) -> Result<u64> {
         let count: u64 = self.conn.query_row(
             "SELECT COUNT(*) FROM peers",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    /// Log an incoming webhook
+    pub fn log_webhook(&self, id: &str, source: &str, event_type: &str, payload: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO infra_webhooks (id, source, event_type, payload) VALUES (?1, ?2, ?3, ?4)",
+            params![id, source, event_type, payload],
+        )?;
+        Ok(())
+    }
+
+    /// Mark a webhook as processed
+    #[allow(dead_code)]
+    pub fn mark_webhook_processed(&self, id: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE infra_webhooks SET processed = 1 WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    /// Update service health status
+    pub fn update_service_status(&self, name: &str, service_type: &str, base_url: &str, status: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO infra_services (name, service_type, base_url, last_health_check, last_status, updated_at)
+             VALUES (?1, ?2, ?3, unixepoch(), ?4, unixepoch())
+             ON CONFLICT(name) DO UPDATE SET
+                last_health_check = unixepoch(),
+                last_status = ?4,
+                updated_at = unixepoch()",
+            params![name, service_type, base_url, status],
+        )?;
+        Ok(())
+    }
+
+    /// Get total webhook count
+    pub fn webhook_count(&self) -> Result<u64> {
+        let count: u64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM infra_webhooks",
             [],
             |row| row.get(0),
         )?;

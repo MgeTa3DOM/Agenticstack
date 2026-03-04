@@ -27,6 +27,7 @@ use tower_http::trace::TraceLayer;
 
 mod config;
 mod db;
+mod infra;
 
 use config::SovereignConfig;
 
@@ -87,17 +88,24 @@ enum Commands {
 
     /// Show browser status (vault, tabs, blocker, shield, tesseract)
     Browser,
+
+    /// Show infrastructure service status (Skool, AvatarVers, Gitea, Cloudflare, Email)
+    Infra {
+        /// Path to config file
+        #[arg(short, long, default_value = "config/sovereign.toml")]
+        config: PathBuf,
+    },
 }
 
 /// Application state shared across handlers (all fields are Send + Sync)
 #[derive(Clone)]
 struct AppState {
-    #[allow(dead_code)]
     config: SovereignConfig,
     hardware: apophy_universal::HardwareInfo,
     peer_id: String,
     start_time: std::time::Instant,
     db: Arc<std::sync::Mutex<db::SovereignDb>>,
+    http_client: reqwest::Client,
 }
 
 #[tokio::main]
@@ -123,6 +131,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::HarnessInit => cmd_harness_init(),
         Commands::Governance => cmd_governance(),
         Commands::Browser => cmd_browser(),
+        Commands::Infra { config } => cmd_infra(config).await,
     }
 }
 
@@ -151,12 +160,18 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         .context("Failed to initialize database")?;
     sovereign_db.migrate().context("Failed to run migrations")?;
 
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .context("Failed to create HTTP client")?;
+
     let state = AppState {
         config: config.clone(),
         hardware: hardware.clone(),
         peer_id,
         start_time: std::time::Instant::now(),
         db: Arc::new(std::sync::Mutex::new(sovereign_db)),
+        http_client,
     };
 
     // Initialize Merkabah (5 crucibles)
@@ -187,6 +202,19 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
     );
     tracing::info!("Freedom Score: {}/100 (sovereign: {})", freedom.score, freedom.sovereign);
 
+    // Log infrastructure status
+    if config.infra.enabled {
+        tracing::info!(
+            "Infrastructure: Skool={} AvatarVers={} AgenticFlow={} Gitea={} Tunnel={} Email={}",
+            config.infra.skool.enabled,
+            config.infra.avatarvers.enabled,
+            config.infra.agenticflow.enabled,
+            config.infra.gitea.enabled,
+            config.infra.cloudflare.enabled,
+            config.infra.email.enabled,
+        );
+    }
+
     let app = Router::new()
         .route("/health", get(health_handler))
         .route("/api/v1/info", get(info_handler))
@@ -201,6 +229,9 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         .route("/api/v1/governance", get(governance_handler))
         .route("/api/v1/governance/surface", get(governance_surface_handler))
         .route("/api/v1/browser/status", get(browser_status_handler))
+        .route("/api/v1/infra/status", get(infra_status_handler))
+        .route("/api/v1/infra/webhook/skool", post(skool_webhook_handler))
+        .route("/api/v1/infra/tunnel/routes", get(tunnel_routes_handler))
         .route("/api/v1/merkabah/align", get({
             let merkabah = merkabah.clone();
             move || merkabah_align_handler(merkabah)
@@ -537,6 +568,135 @@ async fn governance_surface_handler() -> Json<apophy_governance::SurfaceAnalysis
 async fn browser_status_handler() -> Json<apophy_browser::BrowserStatus> {
     let browser = apophy_browser::BrowserCore::new(apophy_browser::core::BrowserConfig::default());
     Json(browser.status())
+}
+
+// === Infrastructure Handlers ===
+
+async fn infra_status_handler(
+    State(state): State<AppState>,
+) -> Json<infra::InfraStatus> {
+    let services = infra::check_all_services(&state.config.infra, &state.http_client).await;
+
+    // Persist health statuses to DB
+    if let Ok(db) = state.db.lock() {
+        for svc in &services {
+            let _ = db.update_service_status(
+                &svc.name,
+                svc.service_type.label(),
+                &svc.base_url,
+                svc.status.icon(),
+            );
+        }
+    }
+
+    let webhook_count = state.db.lock().ok().and_then(|db| db.webhook_count().ok()).unwrap_or(0);
+    let status = infra::build_infra_status(services, &state.config.infra.cloudflare.routes, webhook_count);
+    Json(status)
+}
+
+async fn skool_webhook_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<infra::SkoolWebhookPayload>,
+) -> std::result::Result<Json<infra::SkoolWebhookResponse>, StatusCode> {
+    let webhook_id = format!("{:016x}", rand::random::<u64>());
+    let event_str = payload.event_type.to_string();
+
+    // Log webhook to DB
+    if let Ok(db) = state.db.lock() {
+        let payload_json = serde_json::to_string(&serde_json::json!({
+            "event_type": event_str,
+            "member_email": payload.member_email,
+            "member_name": payload.member_name,
+            "amount_cents": payload.amount_cents,
+            "course_name": payload.course_name,
+        })).unwrap_or_default();
+
+        let _ = db.log_webhook(&webhook_id, "skool", &event_str, &payload_json);
+        let _ = db.audit_log(
+            "skool_webhook",
+            payload.member_email.as_deref(),
+            &format!("event={} member={}", event_str, payload.member_name.as_deref().unwrap_or("unknown")),
+        );
+    }
+
+    // Process contribution
+    let (recorded, tokens) = infra::process_skool_contribution(&payload);
+
+    tracing::info!(
+        "Skool webhook: {} (member={}, tokens={:.2})",
+        event_str,
+        payload.member_name.as_deref().unwrap_or("unknown"),
+        tokens,
+    );
+
+    Ok(Json(infra::SkoolWebhookResponse {
+        received: true,
+        webhook_id,
+        event: event_str,
+        contribution_recorded: recorded,
+        tokens_minted: tokens,
+    }))
+}
+
+async fn tunnel_routes_handler(
+    State(state): State<AppState>,
+) -> Json<Vec<config::TunnelRoute>> {
+    Json(state.config.infra.cloudflare.routes.clone())
+}
+
+async fn cmd_infra(config_path: PathBuf) -> anyhow::Result<()> {
+    let config = SovereignConfig::load(&config_path).unwrap_or_else(|_| {
+        tracing::warn!("Config not found, using defaults");
+        SovereignConfig::default()
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()?;
+
+    println!("=== Apophy Sovereign — Infrastructure Status ===\n");
+
+    if !config.infra.enabled {
+        println!("Infrastructure integration: DISABLED");
+        return Ok(());
+    }
+
+    let services = infra::check_all_services(&config.infra, &client).await;
+    let status = infra::build_infra_status(services, &config.infra.cloudflare.routes, 0);
+
+    for svc in &status.services {
+        let health = svc.status.icon();
+        let enabled = if svc.enabled { "enabled" } else { "disabled" };
+        let latency = svc.latency_ms.map(|ms| format!(" ({}ms)", ms)).unwrap_or_default();
+        println!(
+            "  {:20} [{:4}] {:8} {}{}",
+            svc.name, health, enabled, svc.base_url, latency
+        );
+    }
+
+    println!();
+    println!("Services: {} total, {} up, {} down, {} disabled",
+        status.total, status.healthy, status.down, status.disabled);
+
+    if !config.infra.cloudflare.routes.is_empty() {
+        println!("\nCloudflare Tunnel Routes ({}):", config.infra.cloudflare.tunnel_name);
+        for route in &config.infra.cloudflare.routes {
+            println!("  {} -> {}", route.hostname, route.service);
+        }
+    }
+
+    println!("\nEmail Agent: {} ({}:{})",
+        if config.infra.email.enabled { "ACTIVE" } else { "DISABLED" },
+        config.infra.email.smtp_host,
+        config.infra.email.smtp_port);
+    println!("  From: {} <{}>", config.infra.email.from_name, config.infra.email.from_address);
+
+    println!("\nDomains:");
+    println!("  AvatarVers:   {}", config.infra.avatarvers.base_url);
+    println!("  AgenticFlow:  {}", config.infra.agenticflow.base_url);
+    println!("  Gitea:        {} (SSH port {})", config.infra.gitea.base_url, config.infra.gitea.ssh_port);
+
+    Ok(())
 }
 
 // === Merkabah Handlers ===
