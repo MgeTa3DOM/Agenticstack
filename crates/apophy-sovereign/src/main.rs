@@ -72,6 +72,9 @@ enum Commands {
 
     /// Display the genesis bootstrap document
     Bootstrap,
+
+    /// Run security fortress scan
+    Fortress,
 }
 
 /// Application state shared across handlers (all fields are Send + Sync)
@@ -102,6 +105,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Health { url } => cmd_health(url).await,
         Commands::Audit => cmd_audit(),
         Commands::Bootstrap => cmd_bootstrap(),
+        Commands::Fortress => cmd_fortress(),
     }
 }
 
@@ -174,6 +178,7 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         .route("/api/v1/freedom", get(freedom_handler))
         .route("/api/v1/bootstrap", get(bootstrap_handler))
         .route("/api/v1/resonance", post(resonance_handler))
+        .route("/api/v1/fortress", get(fortress_handler))
         .route("/api/v1/merkabah/align", get({
             let merkabah = merkabah.clone();
             move || merkabah_align_handler(merkabah)
@@ -259,6 +264,19 @@ fn cmd_bootstrap() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn cmd_fortress() -> anyhow::Result<()> {
+    let hostname = std::fs::read_to_string("/etc/hostname")
+        .unwrap_or_else(|_| "unknown".to_string())
+        .trim()
+        .to_string();
+    let scanner = apophy_fortress::FortressScanner::new(hostname);
+    let report = scanner.scan();
+    println!("{}", report.summarize());
+    println!();
+    println!("{}", serde_json::to_string_pretty(&report).unwrap());
+    Ok(())
+}
+
 // === HTTP Handlers ===
 
 #[derive(Serialize)]
@@ -336,6 +354,11 @@ async fn chat_send_handler(
 async fn freedom_handler() -> Json<apophy_liberation::FreedomIndex> {
     let config = apophy_liberation::AuditConfig::sovereign();
     Json(apophy_liberation::LiberationAuditor::audit(&config))
+}
+
+async fn fortress_handler() -> Json<apophy_fortress::FortressReport> {
+    let scanner = apophy_fortress::FortressScanner::new("apophy-sovereign");
+    Json(scanner.scan())
 }
 
 async fn bootstrap_handler() -> Json<apophy_bootstrap::Bootstrap> {

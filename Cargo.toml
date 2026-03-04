@@ -13,6 +13,7 @@ members = [
     "crates/apophy-bootstrap",
     "crates/apophy-chronos",
     "crates/apophy-resonance",
+    "crates/apophy-fortress",
     "crates/apophy-ascension",
     "crates/apophy-sovereign",
 ]
