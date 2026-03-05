@@ -84,7 +84,7 @@ La branche `claude/sovereign-ai-infrastructure-QrHV2` introduit un écosystème 
 
 | # | Crate | Lignes | Tests | Rôle | Maturité |
 |---|-------|--------|-------|------|----------|
-| 1 | `apophy-sovereign` | ~1800 | 0 | Orchestrateur principal, routes API, Paradise, AutoDev | Alpha |
+| 1 | `apophy-sovereign` | ~5200 | 20 | Orchestrateur principal (main 1653L, paradise 1012L, agents 1036L, autodev 494L, config 297L, db 359L, infra 368L) | Alpha |
 | 2 | `apophy-inference` | ~1900 | 6 | Inférence locale GGUF + 4 moteurs (AZR, CTM-C, AlphaResolve, Ashoka) | Stub |
 | 3 | `apophy-browser` | ~4200 | 18 | Navigateur souverain chiffré (Vault, Tabs, Blocker, Shield, Tesseract) | Prototype |
 | 4 | `apophy-harness` | ~1600 | 16 | Pattern Initializer/Worker, Blueprint Engine, Toolshed, Sandbox | Beta |
@@ -104,7 +104,19 @@ La branche `claude/sovereign-ai-infrastructure-QrHV2` introduit un écosystème 
 | 18 | `apophy-dream` | 335 | 6 | Partitions de rêve émotionnel avec décroissance temporelle | Beta |
 | 19 | `apophy-pineal` | 319 | 8 | Intuition non-déterministe, méiose cognitive, entropie | Beta |
 
-**Total : ~18 000 lignes Rust, 113 tests, 30 endpoints API**
+**Total : ~21 000+ lignes Rust, 113+ tests, 30 endpoints API, 15+ commandes CLI**
+
+### Notes sur `apophy-sovereign` (crate principal)
+
+Le crate principal est le plus volumineux (~5200 lignes) et mérite une attention particulière :
+
+- **`main.rs` (1653L)** : Fichier trop large — devrait être découpé en modules (handlers, CLI, routes)
+- **`paradise.rs` (1012L)** : Environnement d'agents bien structuré. `gpu_vram_mb` hardcodé à 0 sans détection runtime
+- **`agents.rs` (1036L)** : ~60% de données hardcodées (spécialisations). Devrait être externalisé en JSON/TOML
+- **`autodev.rs` (494L)** : Pipeline CI/CD interne. `Vec::remove(0)` en boucle = O(n²), utiliser `VecDeque`
+- **`infra.rs` (368L)** : Health checks propres mais webhook signature jamais vérifiée
+- **`db.rs` (359L)** : SQLite avec WAL et foreign keys. Pas de versioning de migrations. 6 fonctions `#[allow(dead_code)]`
+- **`config.rs` (297L)** : Propre. URLs de production en défauts (iagenticflow.org, avatarvers.com)
 
 ---
 
@@ -222,7 +234,7 @@ Couche « conscience » du système — modélisation originale mais avec plusie
 
 | Règle | Violation | Occurrences |
 |-------|-----------|-------------|
-| « No Unwrap in Production » | `unwrap()` sur `Uuid::parse_str`, `DateTime::parse_from_rfc3339` | ~5 |
+| « No Unwrap in Production » | `unwrap()` sur `Uuid::parse_str`, `DateTime::parse_from_rfc3339`, `Mutex::lock().unwrap()` (main.rs, ~10x) | ~15+ |
 | « No TODO without tracking issue » | TODOs sans issue associée | Non vérifié (pas de grep possible dans cette analyse) |
 | « No `#[allow(dead_code)]` without justification » | `#[allow(dead_code)]` sur `master_key` dans vault.rs (justifié) | 1 confirmé |
 | « Delete unused code immediately » | Variants d'enum, champs, et fonctions morts dans 8+ fichiers | ~15+ |
@@ -248,6 +260,11 @@ Couche « conscience » du système — modélisation originale mais avec plusie
 | 3 | **Clés non zéroïsées** : `SovereignIdentity` ne Zeroize pas les secrets à la destruction | HAUTE | `crypto/lib.rs` |
 | 4 | **Intégrité partielle** : hash Bootstrap ne couvre qu'un sous-ensemble de champs | HAUTE | `bootstrap/lib.rs` |
 | 5 | **Paniques possibles** : `unwrap()` sur parsing de données DB potentiellement corrompues | MOYENNE | `memory/lib.rs` |
+| 6 | **CORS permissif** : `CorsLayer::permissive()` autorise toutes les origines en production | MOYENNE | `sovereign/main.rs` |
+| 7 | **Webhook non vérifié** : `webhook_secret` configuré mais jamais utilisé pour valider les webhooks Skool | MOYENNE | `sovereign/infra.rs` |
+| 8 | **Chat non chiffré** : le handler retourne `encrypted: true` sans chiffrement réel | MOYENNE | `sovereign/main.rs` |
+| 9 | **Keygen sans persistance** : `cmd_keygen()` génère des clés mais ne les écrit pas au chemin `output` | BASSE | `sovereign/main.rs` |
+| 10 | **Mutex poisoning** : `Mutex::lock().unwrap()` ~10x dans main.rs — panic en chaîne si un thread échoue | MOYENNE | `sovereign/main.rs` |
 
 ### 6.2 Points forts sécurité
 
