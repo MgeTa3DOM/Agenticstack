@@ -87,6 +87,25 @@ curl -X POST http://localhost:8080/api/v1/fleet/spawn \
 docker compose up -d
 ```
 
+### Try the Examples
+
+```bash
+# Spawn the fleet and see all 3,000 agents
+./examples/spawn_fleet.sh
+
+# Run sovereignty + security audit
+./examples/security_audit.sh
+
+# Interact with the 5-Crucible Consciousness Engine
+./examples/merkabah_consciousness.sh
+
+# Send an E2E encrypted message (Signal Protocol)
+./examples/encrypted_chat.sh
+
+# Set up MCP for Claude Code / Gemini CLI
+./examples/mcp_claude_setup.sh
+```
+
 ---
 
 ## What is this?

@@ -153,6 +153,33 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
+    println!(
+        r#"
+    ╔══════════════════════════════════════════════════════════════╗
+    ║                                                              ║
+    ║              A P O P H Y   S O V E R E I G N                ║
+    ║                                                              ║
+    ║         3,000 Agents  ·  9 Domains  ·  1 Binary              ║
+    ║                                                              ║
+    ║    ┌─────────────┐                                           ║
+    ║    │  SYNARCHY    │     Generals ........  9                  ║
+    ║    │  COUNCIL     │     Specialists ..... 101                 ║
+    ║    └──────┬──────┘     Micro-Agents .... 2,720               ║
+    ║           │             Total ........... 2,830               ║
+    ║     ┌─────┼─────┐                                            ║
+    ║     │     │     │      Crucibles ........ 5                   ║
+    ║    GEN   GEN   GEN     API Routes ....... 23                  ║
+    ║     │     │     │      CLI Commands ..... 15                  ║
+    ║    TAC   TAC   TAC     MCP Tools ........ 6                   ║
+    ║     │     │     │                                             ║
+    ║    OPS   OPS   OPS     Encryption: ChaCha20-Poly1305          ║
+    ║                        Protocol:   Signal (Double Ratchet)    ║
+    ║                        Cloud Fees: $0                         ║
+    ║                                                              ║
+    ╚══════════════════════════════════════════════════════════════╝
+"#
+    );
+
     tracing::info!("Starting Apophy Sovereign...");
 
     let config = SovereignConfig::load(&config_path).unwrap_or_else(|_| {
