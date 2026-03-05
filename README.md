@@ -1,4 +1,11 @@
 <p align="center">
+  <a href="https://github.com/MgeTa3DOM/Agenticstack/actions/workflows/ci.yml"><img src="https://github.com/MgeTa3DOM/Agenticstack/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/MgeTa3DOM/Agenticstack/releases"><img src="https://img.shields.io/github/v/release/MgeTa3DOM/Agenticstack?include_prereleases&style=flat-square&color=blue" alt="Release" /></a>
+  <a href="https://github.com/MgeTa3DOM/Agenticstack/stargazers"><img src="https://img.shields.io/github/stars/MgeTa3DOM/Agenticstack?style=flat-square&color=yellow" alt="Stars" /></a>
+  <a href="https://github.com/MgeTa3DOM/Agenticstack/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT License" /></a>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/Agents-3,000+-blueviolet?style=for-the-badge&logo=robot&logoColor=white" />
   <img src="https://img.shields.io/badge/Domains-9-ff6b6b?style=for-the-badge&logo=grid&logoColor=white" />
   <img src="https://img.shields.io/badge/Zero_Cloud-100%25_Sovereign-00d2d3?style=for-the-badge&logo=lock&logoColor=white" />
@@ -11,6 +18,10 @@
 <p align="center">
   <strong>3,000 AI Agents. 9 Domains. 1 Binary. Zero Cloud.</strong><br/>
   The open-source sovereign AI army that replaces your entire SaaS stack.
+</p>
+
+<p align="center">
+  <sub>If you believe AI should be owned, not rented — <a href="https://github.com/MgeTa3DOM/Agenticstack"><b>star this repo</b></a> and share it.</sub>
 </p>
 
 <p align="center">
