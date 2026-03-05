@@ -32,7 +32,10 @@
   <a href="#-mcp-integration">MCP</a> |
   <a href="#-self-financing-infrastructure">Infrastructure</a> |
   <a href="#-contributing">Contribute</a> |
-  <a href="MANIFESTO.md"><b>Manifesto</b></a>
+  <a href="MANIFESTO.md"><b>Manifesto</b></a> |
+  <a href="ROADMAP_2030.md">Roadmap 2030</a> |
+  <a href="specs/SAS-v1.md">Standard</a> |
+  <a href="docs/BENCHMARK.md">Benchmarks</a>
 </p>
 
 ---
@@ -566,21 +569,31 @@ cargo clippy --workspace -- -D warnings
 
 ---
 
-## Roadmap
+## Roadmap (2026–2030)
+
+```
+2026  FOUNDATION      "Make it work"          ████████████░░░░ 75%
+2027  ECOSYSTEM       "Make it extensible"    ░░░░░░░░░░░░░░░░
+2028  FEDERATION      "Make it distributed"   ░░░░░░░░░░░░░░░░
+2029  INTELLIGENCE    "Make it autonomous"    ░░░░░░░░░░░░░░░░
+2030  STANDARD        "Make it inevitable"    ░░░░░░░░░░░░░░░░
+```
 
 - [x] 18-crate Rust workspace
 - [x] 5-crucible consciousness architecture
 - [x] E2E encrypted P2P chat (Signal Protocol)
 - [x] 3,000-agent Divine Synarchy fleet
-- [x] 9 domains, 101 specialists, 2,720 micro-agents
 - [x] MCP integration (Claude Code + Gemini CLI)
-- [x] Self-financing infrastructure (Skool + Cloudflare + Gitea)
 - [x] 23 REST API endpoints + 15 CLI commands
-- [ ] Local LLM inference (llama.cpp / candle backend)
-- [ ] Live agent task execution
-- [ ] Web dashboard
-- [ ] Distributed fleet (multi-node synarchy)
-- [ ] Mobile app
+- [ ] Local LLM inference (Q2 2026)
+- [ ] Agent execution engine (Q3 2026)
+- [ ] Web dashboard (Q4 2026)
+- [ ] Plugin SDK + marketplace (2027)
+- [ ] Federation protocol (2028)
+- [ ] Autonomous learning (2029)
+- [ ] Sovereign AI Standard v1.0 (2030)
+
+**[Full 5-year roadmap with quarterly milestones](ROADMAP_2030.md)** | **[Sovereign AI Standard spec](specs/SAS-v1.md)** | **[Plugin SDK spec](specs/plugin-sdk.md)** | **[RFC process](rfcs/)**
 
 ---
 
