@@ -1,0 +1,39 @@
+name: Feature Request
+description: Suggest a new feature or agent domain
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: Help us build the sovereign AI army!
+  - type: textarea
+    id: description
+    attributes:
+      label: What would you like?
+      description: Describe the feature or new agent domain.
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - New Agent Domain (10th domain)
+        - New Tactical Specialist
+        - New Capability
+        - Infrastructure Integration
+        - MCP Tool
+        - API Endpoint
+        - CLI Command
+        - Performance
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: How would you use this feature?
+    validations:
+      required: true
