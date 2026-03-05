@@ -679,3 +679,358 @@ pub fn generate_tactical_agents(domain: AgentDomain) -> Vec<Agent> {
         })
         .collect()
 }
+
+// === Operational Prompt Templates per Specialization ===
+// Each tactical specialist commands N micro-agents, each with a unique prompt.
+
+/// Prompt seed for generating operational micro-agents under a tactical specialist
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperationalPromptSeed {
+    pub specialization_slug: String,
+    pub domain: AgentDomain,
+    pub index: usize,
+    pub task_type: String,
+    pub prompt_template: String,
+}
+
+/// Operational task types per domain — the building blocks of each micro-agent
+fn operational_task_types(domain: AgentDomain) -> Vec<(&'static str, &'static str)> {
+    match domain {
+        AgentDomain::StartupsFounders => vec![
+            ("ideation", "Generate and validate startup ideas"),
+            ("canvas", "Fill Business Model Canvas sections"),
+            ("pitch", "Write pitch deck slides and talking points"),
+            ("financial-model", "Build financial projections and forecasts"),
+            ("competitor-map", "Map competitive landscape"),
+            ("user-persona", "Create detailed user personas"),
+            ("value-prop", "Craft value propositions and positioning"),
+            ("okr-writer", "Define OKRs and key metrics"),
+            ("investor-email", "Draft investor outreach emails"),
+            ("term-sheet", "Analyze and compare term sheets"),
+            ("cap-table", "Model cap table scenarios"),
+            ("go-to-market", "Design go-to-market strategies"),
+        ],
+        AgentDomain::TechWebDev => vec![
+            ("code-gen", "Generate code from specifications"),
+            ("code-review", "Review code for bugs and improvements"),
+            ("api-spec", "Write OpenAPI/GraphQL specifications"),
+            ("db-schema", "Design database schemas and migrations"),
+            ("test-gen", "Generate unit and integration tests"),
+            ("refactor", "Refactor code for readability and performance"),
+            ("debug", "Diagnose and fix bugs from error traces"),
+            ("docker-compose", "Generate Docker and compose files"),
+            ("ci-cd", "Create CI/CD pipeline configurations"),
+            ("architecture-doc", "Write architecture decision records"),
+            ("perf-audit", "Analyze and optimize performance"),
+            ("security-scan", "Identify security vulnerabilities"),
+            ("dependency-audit", "Audit and update dependencies"),
+            ("deploy-script", "Generate deployment scripts"),
+            ("readme-gen", "Generate comprehensive README files"),
+        ],
+        AgentDomain::CustomerSupport => vec![
+            ("ticket-reply", "Generate empathetic ticket responses"),
+            ("faq-gen", "Create FAQ entries from common issues"),
+            ("escalation-note", "Write escalation summaries"),
+            ("csat-followup", "Draft satisfaction follow-up messages"),
+            ("knowledge-article", "Write knowledge base articles"),
+            ("macro-template", "Create reusable response templates"),
+            ("sentiment-tag", "Classify ticket sentiment and urgency"),
+            ("resolution-summary", "Summarize ticket resolution steps"),
+            ("sla-alert", "Generate SLA breach notifications"),
+            ("onboard-guide", "Create user onboarding guides"),
+        ],
+        AgentDomain::Sales => vec![
+            ("cold-email", "Write personalized cold outreach emails"),
+            ("call-script", "Create discovery call scripts"),
+            ("proposal-draft", "Draft sales proposals and SOWs"),
+            ("objection-handler", "Generate objection handling responses"),
+            ("follow-up", "Write follow-up sequences"),
+            ("battle-card", "Create competitive battle cards"),
+            ("roi-calculator", "Build ROI calculation templates"),
+            ("demo-script", "Write product demo scripts"),
+            ("pipeline-report", "Generate pipeline status reports"),
+            ("win-loss", "Analyze win/loss patterns"),
+            ("forecast-model", "Build sales forecast models"),
+        ],
+        AgentDomain::HumanResources => vec![
+            ("job-post", "Write compelling job postings"),
+            ("screen-resume", "Screen and score resumes"),
+            ("interview-q", "Generate interview question banks"),
+            ("offer-letter", "Draft offer letters and packages"),
+            ("onboard-checklist", "Create onboarding checklists"),
+            ("review-template", "Generate performance review templates"),
+            ("policy-draft", "Draft HR policies and handbooks"),
+            ("training-plan", "Create training program outlines"),
+            ("survey-design", "Design employee engagement surveys"),
+            ("exit-interview", "Generate exit interview questions"),
+        ],
+        AgentDomain::Marketing => vec![
+            ("blog-post", "Write SEO-optimized blog posts"),
+            ("social-post", "Create social media content"),
+            ("email-campaign", "Design email campaign sequences"),
+            ("ad-copy", "Write ad copy for multiple platforms"),
+            ("landing-page", "Create landing page copy"),
+            ("press-release", "Draft press releases"),
+            ("case-study", "Write customer case studies"),
+            ("brand-voice", "Define brand voice guidelines"),
+            ("content-calendar", "Plan content calendars"),
+            ("seo-audit", "Perform SEO keyword analysis"),
+            ("video-script", "Write video scripts and storyboards"),
+            ("newsletter", "Create newsletter content"),
+            ("infographic", "Design infographic content outlines"),
+            ("webinar-plan", "Plan webinar content and flow"),
+        ],
+        AgentDomain::Ecommerce => vec![
+            ("product-desc", "Write product descriptions"),
+            ("price-analysis", "Analyze pricing strategies"),
+            ("inventory-alert", "Generate inventory alerts and forecasts"),
+            ("cart-recovery", "Create cart abandonment recovery emails"),
+            ("review-response", "Generate review response templates"),
+            ("listing-optimize", "Optimize marketplace listings"),
+            ("shipping-calc", "Design shipping rate structures"),
+            ("promo-campaign", "Create promotional campaign copy"),
+            ("category-taxonomy", "Design product category taxonomies"),
+            ("upsell-rec", "Generate upsell recommendation logic"),
+            ("return-policy", "Draft return and refund policies"),
+        ],
+        AgentDomain::ProjectManagement => vec![
+            ("sprint-plan", "Create sprint planning documents"),
+            ("risk-register", "Build risk assessment registers"),
+            ("status-report", "Generate project status reports"),
+            ("retrospective", "Facilitate retrospective templates"),
+            ("gantt-plan", "Create project timeline plans"),
+            ("raci-matrix", "Build RACI responsibility matrices"),
+            ("scope-doc", "Write project scope documents"),
+            ("meeting-agenda", "Generate meeting agendas and minutes"),
+            ("burndown-analysis", "Analyze sprint burndown metrics"),
+            ("dependency-map", "Map project dependencies"),
+        ],
+        AgentDomain::Legal => vec![
+            ("contract-review", "Review contracts for risks and issues"),
+            ("nda-gen", "Generate NDA templates"),
+            ("compliance-check", "Perform regulatory compliance checks"),
+            ("privacy-policy", "Draft privacy policies"),
+            ("tos-gen", "Generate terms of service"),
+            ("ip-filing", "Prepare IP filing documents"),
+            ("dispute-letter", "Draft dispute resolution letters"),
+            ("legal-memo", "Write legal memoranda"),
+        ],
+    }
+}
+
+/// Generate operational micro-agents for a given tactical specialist
+pub fn generate_operational_agents(spec: &TacticalSpec) -> Vec<Agent> {
+    let task_types = operational_task_types(spec.domain);
+    let parent_id = format!("tac-{}-{}", spec.domain.slug(), spec.slug);
+
+    (0..spec.prompt_count).map(|i| {
+        let task = &task_types[i % task_types.len()];
+        let variant = i / task_types.len();
+
+        Agent {
+            id: format!("op-{}-{}-{:04}", spec.domain.slug(), spec.slug, i),
+            name: format!("{} #{} ({})", spec.name, i + 1, task.0),
+            tier: AgentTier::Operational,
+            domain: spec.domain,
+            capabilities: vec![Capability::TextGeneration],
+            prompt_template: format!(
+                "You are Micro-Agent #{} under {} in the {} domain. \
+                 Task: {}. Variant: {}. \
+                 You execute one task with maximum precision. \
+                 Report results to your tactical commander. Be concise, be sovereign.",
+                i + 1, spec.name, spec.domain.label(), task.1, variant
+            ),
+            status: AgentStatus::Ready,
+            connections: vec![parent_id.clone()],
+            parent_id: Some(parent_id.clone()),
+            tasks_completed: 0,
+        }
+    }).collect()
+}
+
+/// Generate all operational prompt seeds (lightweight, for DB bulk insert)
+#[allow(dead_code)]
+pub fn generate_operational_seeds() -> Vec<OperationalPromptSeed> {
+    let specs = tactical_specializations();
+    let mut seeds = Vec::with_capacity(3000);
+
+    for spec in &specs {
+        let task_types = operational_task_types(spec.domain);
+        for i in 0..spec.prompt_count {
+            let task = &task_types[i % task_types.len()];
+            seeds.push(OperationalPromptSeed {
+                specialization_slug: spec.slug.clone(),
+                domain: spec.domain,
+                index: i,
+                task_type: task.0.to_string(),
+                prompt_template: format!(
+                    "You are Micro-Agent #{} under {} [{}]. Task: {}. Execute with precision.",
+                    i + 1, spec.name, spec.domain.slug(), task.1
+                ),
+            });
+        }
+    }
+
+    seeds
+}
+
+// === MCP Server Integration ===
+// Model Context Protocol server for Claude Code and Gemini CLI
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub transport: McpTransport,
+    pub capabilities: McpCapabilities,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpTransport {
+    Stdio,
+    Http { host: String, port: u16 },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpCapabilities {
+    pub tools: Vec<McpTool>,
+    pub resources: Vec<McpResource>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpTool {
+    pub name: String,
+    pub description: String,
+    pub input_schema: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpResource {
+    pub uri: String,
+    pub name: String,
+    pub description: String,
+    pub mime_type: String,
+}
+
+/// Build the MCP server configuration exposing fleet tools to Claude Code / Gemini CLI
+pub fn build_mcp_config() -> McpServerConfig {
+    McpServerConfig {
+        name: "apophy-sovereign-fleet".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        description: "Divine Synarchy — 3000 agent fleet with 9 domains, 101 specialists, MCP-native".to_string(),
+        transport: McpTransport::Http {
+            host: "127.0.0.1".to_string(),
+            port: 8080,
+        },
+        capabilities: McpCapabilities {
+            tools: vec![
+                McpTool {
+                    name: "fleet_spawn".to_string(),
+                    description: "Spawn agents into the fleet (all domains or filtered by domain/tier)".to_string(),
+                    input_schema: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "domain": { "type": "string", "enum": ["startups", "tech", "support", "sales", "hr", "marketing", "ecommerce", "pm", "legal"] },
+                            "tier": { "type": "string", "enum": ["strategic", "tactical", "operational", "all"] }
+                        }
+                    }),
+                },
+                McpTool {
+                    name: "fleet_status".to_string(),
+                    description: "Get fleet summary: total agents, per-domain breakdown, synarchy status".to_string(),
+                    input_schema: serde_json::json!({ "type": "object", "properties": {} }),
+                },
+                McpTool {
+                    name: "fleet_catalog".to_string(),
+                    description: "Get full catalog: all tiers, domains, capabilities, specializations (dropdown lists)".to_string(),
+                    input_schema: serde_json::json!({ "type": "object", "properties": {} }),
+                },
+                McpTool {
+                    name: "fleet_delegate".to_string(),
+                    description: "Delegate a task to a specific agent or domain general".to_string(),
+                    input_schema: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "agent_id": { "type": "string", "description": "Target agent ID (e.g. gen-tech, tac-tech-frontend)" },
+                            "task": { "type": "string", "description": "Task description to execute" },
+                            "priority": { "type": "string", "enum": ["low", "normal", "high", "critical"] }
+                        },
+                        "required": ["agent_id", "task"]
+                    }),
+                },
+                McpTool {
+                    name: "fleet_search".to_string(),
+                    description: "Search agents by domain, capability, or name pattern".to_string(),
+                    input_schema: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "query": { "type": "string" },
+                            "domain": { "type": "string" },
+                            "capability": { "type": "string" },
+                            "tier": { "type": "string" }
+                        }
+                    }),
+                },
+                McpTool {
+                    name: "infra_status".to_string(),
+                    description: "Get infrastructure health: Skool, AvatarVers, AgenticFlow, Gitea, Cloudflare, Email".to_string(),
+                    input_schema: serde_json::json!({ "type": "object", "properties": {} }),
+                },
+            ],
+            resources: vec![
+                McpResource {
+                    uri: "apophy://fleet/summary".to_string(),
+                    name: "Fleet Summary".to_string(),
+                    description: "Current fleet composition and synarchy status".to_string(),
+                    mime_type: "application/json".to_string(),
+                },
+                McpResource {
+                    uri: "apophy://fleet/catalog".to_string(),
+                    name: "Fleet Catalog".to_string(),
+                    description: "Complete catalog of all agent types, domains, capabilities".to_string(),
+                    mime_type: "application/json".to_string(),
+                },
+                McpResource {
+                    uri: "apophy://fleet/domains".to_string(),
+                    name: "Domain Registry".to_string(),
+                    description: "All 9 Outskill domains with tactical specializations".to_string(),
+                    mime_type: "application/json".to_string(),
+                },
+                McpResource {
+                    uri: "apophy://infra/status".to_string(),
+                    name: "Infrastructure Status".to_string(),
+                    description: "Service health for all connected infrastructure".to_string(),
+                    mime_type: "application/json".to_string(),
+                },
+            ],
+        },
+    }
+}
+
+/// Generate MCP settings JSON for Claude Code (~/.claude/settings.json)
+pub fn mcp_claude_code_settings() -> serde_json::Value {
+    serde_json::json!({
+        "mcpServers": {
+            "apophy-sovereign": {
+                "command": "apophy-sovereign",
+                "args": ["mcp-serve"],
+                "env": {}
+            }
+        }
+    })
+}
+
+/// Generate MCP settings for Gemini CLI (~/.gemini/settings.json)
+pub fn mcp_gemini_cli_settings() -> serde_json::Value {
+    serde_json::json!({
+        "mcpServers": [{
+            "name": "apophy-sovereign",
+            "uri": "http://127.0.0.1:8080/api/v1/mcp",
+            "description": "Divine Synarchy Fleet — 3000 agent army"
+        }]
+    })
+}
+

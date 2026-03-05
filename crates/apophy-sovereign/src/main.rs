@@ -106,6 +106,9 @@ enum Commands {
 
     /// Show full agent fleet catalog (all dropdown lists)
     FleetCatalog,
+
+    /// Show MCP server configuration for Claude Code / Gemini CLI
+    Mcp,
 }
 
 /// Application state shared across handlers (all fields are Send + Sync)
@@ -145,6 +148,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Infra { config } => cmd_infra(config).await,
         Commands::Fleet { config } => cmd_fleet(config).await,
         Commands::FleetCatalog => cmd_fleet_catalog(),
+        Commands::Mcp => cmd_mcp(),
     }
 }
 
@@ -259,6 +263,8 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         .route("/api/v1/fleet/catalog", get(fleet_catalog_handler))
         .route("/api/v1/fleet/spawn", post(fleet_spawn_handler))
         .route("/api/v1/fleet/domains", get(fleet_domains_handler))
+        .route("/api/v1/mcp/config", get(mcp_config_handler))
+        .route("/api/v1/mcp/tools", get(mcp_tools_handler))
         .route("/api/v1/merkabah/align", get({
             let merkabah = merkabah.clone();
             move || merkabah_align_handler(merkabah)
@@ -726,8 +732,6 @@ async fn cmd_infra(config_path: PathBuf) -> anyhow::Result<()> {
     Ok(())
 }
 
-// === Merkabah Handlers ===
-
 // === Fleet Handlers ===
 
 async fn fleet_summary_handler() -> Json<agents::FleetSummary> {
@@ -754,6 +758,7 @@ struct FleetSpawnResponse {
     spawned: usize,
     strategic: usize,
     tactical: usize,
+    operational: usize,
     message: String,
 }
 
@@ -768,6 +773,11 @@ async fn fleet_spawn_handler(
     // Generate strategic generals
     let generals = agents::generate_strategic_agents();
     let mut tactical_total = 0;
+    let mut operational_total = 0;
+    let specs = agents::tactical_specializations();
+
+    let include_operational = req.tier.as_deref() == Some("all")
+        || req.tier.as_deref() == Some("operational");
 
     if let Ok(db) = state.db.lock() {
         for gen in &generals {
@@ -778,15 +788,10 @@ async fn fleet_spawn_handler(
             );
         }
 
-        // Generate tactical agents per domain (filter by request if specified)
+        // Generate tactical + operational agents per domain
         for domain in agents::AgentDomain::all() {
             if let Some(ref d) = req.domain {
                 if domain.slug() != d.as_str() {
-                    continue;
-                }
-            }
-            if let Some(ref t) = req.tier {
-                if t != "tactical" && t != "all" {
                     continue;
                 }
             }
@@ -801,9 +806,30 @@ async fn fleet_spawn_handler(
                     tac.domain.slug(), &caps, &tac.prompt_template,
                     tac.parent_id.as_deref(),
                 );
-                // Connect to general
                 if let Some(ref parent) = tac.parent_id {
                     let _ = db.add_agent_connection(&tac.id, parent, "hierarchy");
+                }
+            }
+
+            // Spawn operational micro-agents if requested
+            if include_operational {
+                let domain_specs: Vec<_> = specs.iter()
+                    .filter(|s| s.domain == *domain)
+                    .collect();
+                for spec in domain_specs {
+                    let ops = agents::generate_operational_agents(spec);
+                    operational_total += ops.len();
+                    for op in &ops {
+                        let caps = serde_json::to_string(&op.capabilities).unwrap_or_default();
+                        let _ = db.register_agent(
+                            &op.id, &op.name, "operational",
+                            op.domain.slug(), &caps, &op.prompt_template,
+                            op.parent_id.as_deref(),
+                        );
+                        if let Some(ref parent) = op.parent_id {
+                            let _ = db.add_agent_connection(&op.id, parent, "hierarchy");
+                        }
+                    }
                 }
             }
         }
@@ -811,17 +837,20 @@ async fn fleet_spawn_handler(
         let _ = db.audit_log(
             "fleet_spawn",
             Some("sovereign"),
-            &format!("spawned {} strategic + {} tactical agents", generals.len(), tactical_total),
+            &format!("spawned {} strategic + {} tactical + {} operational agents",
+                generals.len(), tactical_total, operational_total),
         );
     }
 
-    let total = generals.len() + tactical_total;
-    tracing::info!("Fleet spawned: {} strategic + {} tactical = {} agents", generals.len(), tactical_total, total);
+    let total = generals.len() + tactical_total + operational_total;
+    tracing::info!("Fleet spawned: {} strategic + {} tactical + {} operational = {} agents",
+        generals.len(), tactical_total, operational_total, total);
 
     Ok(Json(FleetSpawnResponse {
         spawned: total,
         strategic: generals.len(),
         tactical: tactical_total,
+        operational: operational_total,
         message: format!("Divine Synarchy: {} agents deployed across {} domains", total, agents::AgentDomain::all().len()),
     }))
 }
@@ -915,6 +944,49 @@ fn cmd_fleet_catalog() -> anyhow::Result<()> {
     println!("{}", serde_json::to_string_pretty(&catalog)?);
 
     Ok(())
+}
+
+fn cmd_mcp() -> anyhow::Result<()> {
+    let mcp = agents::build_mcp_config();
+
+    println!("=== Apophy Sovereign — MCP Server Configuration ===\n");
+    println!("Name:        {}", mcp.name);
+    println!("Version:     {}", mcp.version);
+    println!("Description: {}", mcp.description);
+    println!("Tools:       {}", mcp.capabilities.tools.len());
+    println!("Resources:   {}", mcp.capabilities.resources.len());
+
+    println!("\n--- Tools ---");
+    for tool in &mcp.capabilities.tools {
+        println!("  {} — {}", tool.name, tool.description);
+    }
+
+    println!("\n--- Resources ---");
+    for res in &mcp.capabilities.resources {
+        println!("  {} — {}", res.uri, res.description);
+    }
+
+    println!("\n--- Claude Code settings (add to ~/.claude/settings.json) ---");
+    println!("{}", serde_json::to_string_pretty(&agents::mcp_claude_code_settings())?);
+
+    println!("\n--- Gemini CLI settings (add to ~/.gemini/settings.json) ---");
+    println!("{}", serde_json::to_string_pretty(&agents::mcp_gemini_cli_settings())?);
+
+    println!("\n--- Full MCP Config (JSON) ---");
+    println!("{}", serde_json::to_string_pretty(&mcp)?);
+
+    Ok(())
+}
+
+// === MCP Handlers ===
+
+async fn mcp_config_handler() -> Json<agents::McpServerConfig> {
+    Json(agents::build_mcp_config())
+}
+
+async fn mcp_tools_handler() -> Json<Vec<agents::McpTool>> {
+    let mcp = agents::build_mcp_config();
+    Json(mcp.capabilities.tools)
 }
 
 // === Merkabah Handlers ===
