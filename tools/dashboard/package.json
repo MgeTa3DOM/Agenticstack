@@ -1,0 +1,10 @@
+{
+  "name": "apophy-dashboard",
+  "version": "0.1.0",
+  "description": "Apophy Sovereign Brain Dashboard — Real-time monitoring",
+  "scripts": {
+    "start": "bun run index.ts",
+    "dev": "bun --watch run index.ts"
+  },
+  "dependencies": {}
+}

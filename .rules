@@ -1,0 +1,62 @@
+# Apophy Sovereign — Codebase Rules
+# These rules ensure zero tech debt and stable evolution.
+
+## Architecture Rules
+
+1. **Single Binary**: All Rust crates compile into `apophy-sovereign`. No separate binaries.
+2. **Zero External API Calls**: No cloud LLM calls. All inference is local via GGUF.
+3. **No Telemetry**: No phone-home, no analytics, no tracking. Ever.
+4. **Trait-Based Design**: All backends implement `InferenceBackend`. All agents implement `AgentBackend`.
+5. **Feature Flags**: Optional backends behind Cargo features, not runtime toggles.
+
+## Code Quality Rules
+
+1. **Zero Clippy Warnings**: `cargo clippy --workspace -- -D warnings` must pass.
+2. **All Tests Pass**: `cargo test --workspace` must be green before merge.
+3. **No Unwrap in Production**: Use `?` or `.ok()` or `.unwrap_or()`. Never `.unwrap()` in handlers.
+4. **Serde Everywhere**: All public types derive `Serialize, Deserialize`.
+5. **Error Types**: Each crate has its own `Error` enum via `thiserror`.
+
+## Naming Conventions
+
+- Crates: `apophy-{name}` (kebab-case)
+- Modules: `snake_case`
+- Types: `PascalCase`
+- Functions: `snake_case`
+- Constants: `SCREAMING_SNAKE_CASE`
+- API Routes: `/api/v1/{resource}/{action}` (lowercase, hyphens)
+
+## Git Rules
+
+- Commit prefix: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `ci:`
+- One logical change per commit
+- Branch: `claude/{description}-{id}` or `feature/{description}`
+
+## Dependency Rules
+
+- Workspace-level dependencies in root `Cargo.toml`
+- No duplicate versions of the same crate
+- Security audit: `cargo audit` must pass
+- Prefer pure Rust crates. C deps behind feature flags.
+
+## Config Rules
+
+- All config in `config/sovereign.toml`
+- `#[serde(default)]` on all optional fields
+- Environment variable overrides via `APOPHY_` prefix
+- No hardcoded secrets. Use `_env` suffix for env var names.
+
+## Test Rules
+
+- Unit tests in `#[cfg(test)] mod tests` at bottom of each file
+- Integration tests in `tests/` directory
+- Mock backends (`StubBackend`) for all LLM-dependent tests
+- Minimum 80% coverage on new code
+
+## A0 Tech Debt Protocol
+
+- No TODO comments without a tracking issue
+- No `#[allow(dead_code)]` without justification comment
+- No deprecated APIs without migration path
+- Refactor before adding complexity
+- Delete unused code immediately

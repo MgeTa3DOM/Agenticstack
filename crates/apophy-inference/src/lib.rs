@@ -32,6 +32,7 @@ pub mod alpha_resolve;
 pub mod azr;
 pub mod ctmc;
 pub mod ashoka;
+pub mod toon;
 
 pub use backend::{
     InferenceBackend, InferenceRequest, InferenceResponse,
@@ -42,6 +43,7 @@ pub use alpha_resolve::{AlphaResolve, AlphaResolveConfig, ResolveResult, Resolve
 pub use azr::{AbsoluteZeroReasoner, AzrConfig, AzrEpisode, AzrTask, TaskDifficulty};
 pub use ctmc::{CtmcCompressor, CtmcConfig, CompressedThought, CompressionStats};
 pub use ashoka::{AshokaLearner, AshokaConfig, FeedbackEntry, LearningSignal, PromptEvolution};
+pub use toon::{ToonCodec, ToonConfig, ToonEncoded, ToonStats};
 
 use thiserror::Error;
 
