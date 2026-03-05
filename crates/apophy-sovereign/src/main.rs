@@ -19,6 +19,7 @@ use axum::{
 };
 use clap::Parser;
 use serde::{Deserialize, Serialize};
+use apophy_inference::InferenceBackend;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -109,6 +110,26 @@ enum Commands {
 
     /// Show MCP server configuration for Claude Code / Gemini CLI
     Mcp,
+
+    /// Show inference brain status (backend, model, reasoning engines)
+    Brain,
+
+    /// Run AlphaResolve reasoning on a task
+    Reason {
+        /// The task/question to reason about
+        #[arg(short, long)]
+        task: String,
+    },
+
+    /// Run AZR self-play episode (generate → solve → verify → learn)
+    SelfPlay {
+        /// Domain for task generation (math, logic, code, reasoning, analysis)
+        #[arg(short, long, default_value = "reasoning")]
+        domain: String,
+        /// Difficulty level (easy, medium, hard, expert)
+        #[arg(long, default_value = "medium")]
+        difficulty: String,
+    },
 }
 
 /// Application state shared across handlers (all fields are Send + Sync)
@@ -120,6 +141,7 @@ struct AppState {
     start_time: std::time::Instant,
     db: Arc<std::sync::Mutex<db::SovereignDb>>,
     http_client: reqwest::Client,
+    brain: Arc<std::sync::Mutex<apophy_inference::SovereignBrain>>,
 }
 
 #[tokio::main]
@@ -149,6 +171,9 @@ async fn main() -> anyhow::Result<()> {
         Commands::Fleet { config } => cmd_fleet(config).await,
         Commands::FleetCatalog => cmd_fleet_catalog(),
         Commands::Mcp => cmd_mcp(),
+        Commands::Brain => cmd_brain(),
+        Commands::Reason { task } => cmd_reason(task),
+        Commands::SelfPlay { domain, difficulty } => cmd_self_play(domain, difficulty),
     }
 }
 
@@ -174,6 +199,9 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
     ║     │     │     │                                             ║
     ║    OPS   OPS   OPS     Encryption: ChaCha20-Poly1305          ║
     ║                        Protocol:   Signal (Double Ratchet)    ║
+    ║                        Inference:  Local GGUF (sovereign)     ║
+    ║                        Reasoning:  AlphaResolve + AZR         ║
+    ║                        AutoLearn:  Ashoka + CTM-C             ║
     ║                        Cloud Fees: $0                         ║
     ║                                                              ║
     ╚══════════════════════════════════════════════════════════════╝
@@ -196,6 +224,33 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         hardware.cpu_cores
     );
 
+    // Initialize SovereignBrain (local inference engine)
+    let brain = {
+        let gguf_config = apophy_inference::GgufConfig::auto(
+            &config.ai.model_path,
+            &hardware,
+        );
+        let backend: Box<dyn apophy_inference::InferenceBackend + Send + Sync> =
+            match apophy_inference::GgufBackend::new(gguf_config) {
+                Ok(b) if b.is_loaded() => {
+                    tracing::info!("Brain: GGUF backend loaded ({})", config.ai.model_name);
+                    Box::new(b)
+                }
+                _ => {
+                    tracing::info!("Brain: Stub backend (no GGUF model found — download a .gguf to enable local inference)");
+                    Box::new(apophy_inference::StubBackend::new(&config.ai.model_name))
+                }
+            };
+        apophy_inference::SovereignBrain::new(backend, hardware.clone())
+    };
+    let brain_status = brain.status();
+    tracing::info!(
+        "Brain: backend={}, model={}, loaded={}",
+        brain_status.backend_name,
+        brain_status.model_name.as_deref().unwrap_or("none"),
+        brain_status.model_loaded,
+    );
+
     let fuel_client = apophy_fuel::FuelClient::new();
     let peer_id = fuel_client.peer_id().to_string();
     tracing::info!("Fuel client: {}", peer_id);
@@ -216,6 +271,7 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         start_time: std::time::Instant::now(),
         db: Arc::new(std::sync::Mutex::new(sovereign_db)),
         http_client,
+        brain: Arc::new(std::sync::Mutex::new(brain)),
     };
 
     // Initialize Merkabah (5 crucibles)
@@ -292,6 +348,12 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         .route("/api/v1/fleet/domains", get(fleet_domains_handler))
         .route("/api/v1/mcp/config", get(mcp_config_handler))
         .route("/api/v1/mcp/tools", get(mcp_tools_handler))
+        .route("/api/v1/brain/status", get(brain_status_handler))
+        .route("/api/v1/brain/generate", post(brain_generate_handler))
+        .route("/api/v1/brain/reason", post(brain_reason_handler))
+        .route("/api/v1/brain/self-play", post(brain_self_play_handler))
+        .route("/api/v1/brain/compress", post(brain_compress_handler))
+        .route("/api/v1/brain/feedback", post(brain_feedback_handler))
         .route("/api/v1/merkabah/align", get({
             let merkabah = merkabah.clone();
             move || merkabah_align_handler(merkabah)
@@ -1003,6 +1065,258 @@ fn cmd_mcp() -> anyhow::Result<()> {
     println!("{}", serde_json::to_string_pretty(&mcp)?);
 
     Ok(())
+}
+
+// === Brain CLI Commands ===
+
+fn cmd_brain() -> anyhow::Result<()> {
+    let hardware = apophy_universal::detect_hardware();
+    let stub = apophy_inference::StubBackend::new("sovereign-local");
+    let brain = apophy_inference::SovereignBrain::new(Box::new(stub), hardware);
+    let status = brain.status();
+
+    println!("=== Apophy Sovereign — Brain Status ===\n");
+    println!("Backend:     {}", status.backend_name);
+    println!("Model:       {}", status.model_name.as_deref().unwrap_or("none"));
+    println!("Loaded:      {}", status.model_loaded);
+    println!("Hardware:    {}", status.hardware_backend);
+    println!("Memory:      {} MB", status.memory_mb);
+    println!("CPU Cores:   {}", status.cpu_cores);
+    println!("AZR Episodes: {}", status.azr_episodes);
+    println!("Ashoka Feedback: {}", status.ashoka_feedback_count);
+    println!("Ashoka Evolutions: {}", status.ashoka_evolutions);
+    println!();
+    println!("Reasoning Engines:");
+    println!("  AlphaResolve — Multi-step generate → verify → refine");
+    println!("  AZR          — Absolute Zero Reasoner (self-play)");
+    println!("  CTM-C        — Chain-of-Thought Moderne-Compressed");
+    println!("  Ashoka       — Autonomous prompt evolution");
+    println!();
+    println!("--- JSON ---");
+    println!("{}", serde_json::to_string_pretty(&status)?);
+
+    Ok(())
+}
+
+fn cmd_reason(task: String) -> anyhow::Result<()> {
+    let hardware = apophy_universal::detect_hardware();
+    let stub = apophy_inference::StubBackend::new("sovereign-local");
+    let brain = apophy_inference::SovereignBrain::new(Box::new(stub), hardware);
+    let params = apophy_inference::GenerationParams::reasoning();
+
+    println!("=== AlphaResolve — Multi-step Reasoning ===\n");
+    println!("Task: {}\n", task);
+
+    let result = brain.reason(&task, &params)?;
+
+    println!("Converged:   {}", result.converged);
+    println!("Confidence:  {:.3}", result.confidence);
+    println!("Rounds:      {}", result.rounds);
+    println!("Tokens:      {}", result.total_tokens);
+    println!("Duration:    {} ms", result.duration_ms);
+    println!();
+
+    for step in &result.steps {
+        println!(
+            "  [{:?}] R{} — {} ({}ms, {} tokens)",
+            step.phase, step.round, step.input_summary, step.duration_ms, step.tokens_used
+        );
+        if let Some(conf) = step.confidence {
+            println!("    Confidence: {:.3}", conf);
+        }
+    }
+
+    println!("\n--- Final Answer ---");
+    println!("{}", result.final_answer);
+    println!("\n--- JSON ---");
+    println!("{}", serde_json::to_string_pretty(&result)?);
+
+    Ok(())
+}
+
+fn cmd_self_play(domain: String, difficulty: String) -> anyhow::Result<()> {
+    let hardware = apophy_universal::detect_hardware();
+    let stub = apophy_inference::StubBackend::new("sovereign-local");
+    let mut brain = apophy_inference::SovereignBrain::new(Box::new(stub), hardware);
+
+    let diff = match difficulty.as_str() {
+        "easy" => apophy_inference::TaskDifficulty::Easy,
+        "hard" => apophy_inference::TaskDifficulty::Hard,
+        "expert" => apophy_inference::TaskDifficulty::Expert,
+        _ => apophy_inference::TaskDifficulty::Medium,
+    };
+
+    println!("=== AZR — Absolute Zero Reasoner Self-Play ===\n");
+    println!("Domain:     {}", domain);
+    println!("Difficulty: {}\n", diff);
+
+    let episode = brain.self_play(&domain, diff)?;
+
+    println!("Task:     {}", episode.task.question);
+    println!("Solution: {}", episode.solution);
+    println!("Correct:  {}", episode.verification.correct);
+    println!("Confidence: {:.3}", episode.verification.confidence);
+    println!("Feedback: {}", episode.verification.feedback);
+    println!("Tokens:   {}", episode.tokens_used);
+    println!("Duration: {} ms", episode.duration_ms);
+    println!("\n--- JSON ---");
+    println!("{}", serde_json::to_string_pretty(&episode)?);
+
+    Ok(())
+}
+
+// === Brain API Handlers ===
+
+async fn brain_status_handler(
+    State(state): State<AppState>,
+) -> Json<apophy_inference::BrainStatus> {
+    let brain = state.brain.lock().unwrap();
+    Json(brain.status())
+}
+
+#[derive(Deserialize)]
+struct BrainGenerateRequest {
+    prompt: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    system_prompt: Option<String>,
+    #[serde(default = "default_max_tokens")]
+    max_tokens: usize,
+    #[serde(default = "default_temperature")]
+    temperature: f32,
+}
+
+fn default_max_tokens() -> usize { 2048 }
+fn default_temperature() -> f32 { 0.7 }
+
+async fn brain_generate_handler(
+    State(state): State<AppState>,
+    Json(req): Json<BrainGenerateRequest>,
+) -> std::result::Result<Json<apophy_inference::InferenceResponse>, StatusCode> {
+    let brain = state.brain.lock().unwrap();
+    let params = apophy_inference::GenerationParams {
+        max_tokens: req.max_tokens,
+        temperature: req.temperature,
+        ..Default::default()
+    };
+
+    match brain.generate(&req.prompt, &params) {
+        Ok(response) => Ok(Json(response)),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+#[derive(Deserialize)]
+struct BrainReasonRequest {
+    task: String,
+    #[serde(default = "default_max_tokens")]
+    max_tokens: usize,
+}
+
+async fn brain_reason_handler(
+    State(state): State<AppState>,
+    Json(req): Json<BrainReasonRequest>,
+) -> std::result::Result<Json<apophy_inference::ResolveResult>, StatusCode> {
+    let brain = state.brain.lock().unwrap();
+    let params = apophy_inference::GenerationParams {
+        max_tokens: req.max_tokens,
+        ..apophy_inference::GenerationParams::reasoning()
+    };
+
+    match brain.reason(&req.task, &params) {
+        Ok(result) => Ok(Json(result)),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+#[derive(Deserialize)]
+struct BrainSelfPlayRequest {
+    #[serde(default = "default_domain")]
+    domain: String,
+    #[serde(default = "default_difficulty")]
+    difficulty: String,
+}
+
+fn default_domain() -> String { "reasoning".to_string() }
+fn default_difficulty() -> String { "medium".to_string() }
+
+async fn brain_self_play_handler(
+    State(state): State<AppState>,
+    Json(req): Json<BrainSelfPlayRequest>,
+) -> std::result::Result<Json<apophy_inference::AzrEpisode>, StatusCode> {
+    let mut brain = state.brain.lock().unwrap();
+    let difficulty = match req.difficulty.as_str() {
+        "easy" => apophy_inference::TaskDifficulty::Easy,
+        "hard" => apophy_inference::TaskDifficulty::Hard,
+        "expert" => apophy_inference::TaskDifficulty::Expert,
+        _ => apophy_inference::TaskDifficulty::Medium,
+    };
+
+    match brain.self_play(&req.domain, difficulty) {
+        Ok(episode) => Ok(Json(episode)),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+#[derive(Deserialize)]
+struct BrainCompressRequest {
+    thought_chain: String,
+}
+
+async fn brain_compress_handler(
+    State(state): State<AppState>,
+    Json(req): Json<BrainCompressRequest>,
+) -> std::result::Result<Json<apophy_inference::CompressedThought>, StatusCode> {
+    let brain = state.brain.lock().unwrap();
+    match brain.compress_thought(&req.thought_chain) {
+        Ok(compressed) => Ok(Json(compressed)),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+#[derive(Deserialize)]
+struct BrainFeedbackRequest {
+    prompt_id: String,
+    original_prompt: String,
+    response: String,
+    score: f64,
+    #[serde(default)]
+    positive: bool,
+}
+
+#[derive(Serialize)]
+struct BrainFeedbackResponse {
+    recorded: bool,
+    evolution: Option<apophy_inference::PromptEvolution>,
+}
+
+async fn brain_feedback_handler(
+    State(state): State<AppState>,
+    Json(req): Json<BrainFeedbackRequest>,
+) -> std::result::Result<Json<BrainFeedbackResponse>, StatusCode> {
+    let mut brain = state.brain.lock().unwrap();
+
+    let signal = if req.positive {
+        apophy_inference::LearningSignal::Positive { score: req.score }
+    } else {
+        apophy_inference::LearningSignal::Negative { score: req.score, reason: None }
+    };
+
+    let feedback = apophy_inference::FeedbackEntry {
+        prompt_id: req.prompt_id,
+        original_prompt: req.original_prompt,
+        response: req.response,
+        signal,
+        context: None,
+    };
+
+    match brain.record_feedback(feedback) {
+        Ok(evolution) => Ok(Json(BrainFeedbackResponse {
+            recorded: true,
+            evolution,
+        })),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
 }
 
 // === MCP Handlers ===

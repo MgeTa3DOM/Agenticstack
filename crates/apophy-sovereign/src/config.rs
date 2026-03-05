@@ -43,7 +43,22 @@ pub struct AiConfig {
     pub max_tokens: usize,
     pub temperature: f32,
     pub context_length: usize,
+    #[serde(default = "default_alpha_resolve_rounds")]
+    pub alpha_resolve_rounds: usize,
+    #[serde(default = "default_alpha_resolve_candidates")]
+    pub alpha_resolve_candidates: usize,
+    #[serde(default = "default_azr_max_episodes")]
+    pub azr_max_episodes: usize,
+    #[serde(default = "default_true")]
+    pub ashoka_enabled: bool,
+    #[serde(default = "default_true")]
+    pub ctmc_enabled: bool,
 }
+
+fn default_alpha_resolve_rounds() -> usize { 3 }
+fn default_alpha_resolve_candidates() -> usize { 3 }
+fn default_azr_max_episodes() -> usize { 1000 }
+fn default_true() -> bool { true }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityConfig {
@@ -241,6 +256,11 @@ impl Default for SovereignConfig {
                 max_tokens: 4096,
                 temperature: 0.7,
                 context_length: 4096,
+                alpha_resolve_rounds: 3,
+                alpha_resolve_candidates: 3,
+                azr_max_episodes: 1000,
+                ashoka_enabled: true,
+                ctmc_enabled: true,
             },
             security: SecurityConfig {
                 encryption: "chacha20poly1305".to_string(),
