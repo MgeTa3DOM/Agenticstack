@@ -31,7 +31,8 @@
   <a href="#-api-endpoints-23">API</a> |
   <a href="#-mcp-integration">MCP</a> |
   <a href="#-self-financing-infrastructure">Infrastructure</a> |
-  <a href="#-contributing">Contribute</a>
+  <a href="#-contributing">Contribute</a> |
+  <a href="MANIFESTO.md"><b>Manifesto</b></a>
 </p>
 
 ---
@@ -593,9 +594,19 @@ Sovereignty = (Your Hardware) + (Your Data) + (Your Agents) - (Cloud Fees) - (Sa
 
 ---
 
+## The Manifesto
+
+> *"We were promised that AI would liberate humanity. Instead, we got $20/month subscriptions to access our own intelligence."*
+
+Read the full [Sovereign AI Manifesto](MANIFESTO.md) — the 7 principles that guide this project.
+
+---
+
 ## Star History
 
 If this project helps you escape SaaS slavery, star it. Every star is a vote for digital sovereignty.
+
+> **The revolution starts on your laptop.**
 
 ---
 
@@ -604,5 +615,5 @@ If this project helps you escape SaaS slavery, star it. Every star is a vote for
 </p>
 
 <p align="center">
-  MIT License | <a href="https://github.com/MgeTa3DOM/Agenticstack">GitHub</a> | <a href="https://iagenticflow.org">iAgenticFlow</a> | <a href="https://avatarvers.com">AvatarVers</a>
+  <a href="MANIFESTO.md"><b>Read the Manifesto</b></a> | <a href="https://github.com/MgeTa3DOM/Agenticstack">GitHub</a> | <a href="https://iagenticflow.org">iAgenticFlow</a> | <a href="https://avatarvers.com">AvatarVers</a>
 </p>
