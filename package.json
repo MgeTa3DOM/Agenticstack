@@ -1,0 +1,25 @@
+{
+  "name": "app",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test.js",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MgeTa3DOM/Agenticstack.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/MgeTa3DOM/Agenticstack/issues"
+  },
+  "homepage": "https://github.com/MgeTa3DOM/Agenticstack#readme",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}
