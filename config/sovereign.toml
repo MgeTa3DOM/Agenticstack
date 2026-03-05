@@ -102,3 +102,63 @@ service = "http://localhost:3000"
 [[infra.cloudflare.routes]]
 hostname = "avatarvers.com"
 service = "http://localhost:8080"
+
+# === Paradise — Agent Dream Environment ===
+# Content-addressed, self-sustaining, neutral-fiber ecosystem
+
+[paradise]
+enabled = true
+name = "Apophy Paradise"
+
+[paradise.fiber]
+strategy = "adaptive"
+max_share = 0.15
+rebalance_interval_secs = 30
+
+[paradise.autodev]
+enabled = true
+repo_url = "http://localhost:3000/apophy/sovereign"
+branch = "main"
+auto_build = true
+auto_test = true
+auto_deploy = true
+auto_doc = true
+auto_finetune = true
+health_interval_secs = 60
+auto_recover = true
+max_recover_attempts = 3
+
+[paradise.autodev.commands]
+build = "cargo build --workspace --release"
+test = "cargo test --workspace"
+lint = "cargo clippy --workspace -- -D warnings"
+doc = "node prime.js --doctor"
+deploy = "docker compose up -d --build"
+health_url = "http://localhost:8080/health"
+finetune = "python tools/finetune/trainer.py pipeline"
+
+[[paradise.autodev.targets]]
+name = "local-docker"
+type = "docker"
+url = "unix:///var/run/docker.sock"
+enabled = true
+
+[[paradise.autodev.targets]]
+name = "gitea"
+type = "gitea"
+url = "http://localhost:3000"
+enabled = true
+
+[paradise.datasets]
+# Auto-collect from AZR self-play
+auto_collect = true
+# Export format for fine-tuning
+export_format = "jsonl"
+# Storage directory
+storage_dir = "data/datasets"
+
+[paradise.hash_registry]
+# Content-addressed verification
+enabled = true
+# Storage for hash entries
+storage_dir = "data/hashes"

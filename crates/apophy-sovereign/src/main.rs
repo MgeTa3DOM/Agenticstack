@@ -27,9 +27,11 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 mod agents;
+mod autodev;
 mod config;
 mod db;
 mod infra;
+mod paradise;
 
 use config::SovereignConfig;
 
@@ -130,6 +132,15 @@ enum Commands {
         #[arg(long, default_value = "medium")]
         difficulty: String,
     },
+
+    /// Show Paradise environment status (capabilities, fiber, registry, datasets)
+    Paradise,
+
+    /// Show AutoDev pipeline status and run reports
+    AutoDev,
+
+    /// Show dataset registry summary
+    Dataset,
 }
 
 /// Application state shared across handlers (all fields are Send + Sync)
@@ -142,6 +153,8 @@ struct AppState {
     db: Arc<std::sync::Mutex<db::SovereignDb>>,
     http_client: reqwest::Client,
     brain: Arc<std::sync::Mutex<apophy_inference::SovereignBrain>>,
+    paradise: Arc<std::sync::Mutex<paradise::ParadiseEnv>>,
+    autodev_engine: Arc<std::sync::Mutex<autodev::AutoDevEngine>>,
 }
 
 #[tokio::main]
@@ -174,6 +187,9 @@ async fn main() -> anyhow::Result<()> {
         Commands::Brain => cmd_brain(),
         Commands::Reason { task } => cmd_reason(task),
         Commands::SelfPlay { domain, difficulty } => cmd_self_play(domain, difficulty),
+        Commands::Paradise => cmd_paradise(),
+        Commands::AutoDev => cmd_autodev(),
+        Commands::Dataset => cmd_dataset(),
     }
 }
 
@@ -264,6 +280,20 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         .build()
         .context("Failed to create HTTP client")?;
 
+    // Initialize Paradise environment
+    let paradise_env = paradise::build_paradise(&hardware);
+    let paradise_score = paradise::capability_score(&paradise_env.capabilities);
+    tracing::info!(
+        "Paradise: score={:.0}% fiber={:?} registry={} datasets={}",
+        paradise_score * 100.0,
+        paradise_env.fiber.strategy,
+        paradise_env.hash_registry.total_entries,
+        paradise_env.datasets.total_entries,
+    );
+
+    // Initialize AutoDev engine
+    let autodev_engine = autodev::AutoDevEngine::new(autodev::AutoDevEngineConfig::default());
+
     let state = AppState {
         config: config.clone(),
         hardware: hardware.clone(),
@@ -272,6 +302,8 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         db: Arc::new(std::sync::Mutex::new(sovereign_db)),
         http_client,
         brain: Arc::new(std::sync::Mutex::new(brain)),
+        paradise: Arc::new(std::sync::Mutex::new(paradise_env)),
+        autodev_engine: Arc::new(std::sync::Mutex::new(autodev_engine)),
     };
 
     // Initialize Merkabah (5 crucibles)
@@ -354,6 +386,13 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         .route("/api/v1/brain/self-play", post(brain_self_play_handler))
         .route("/api/v1/brain/compress", post(brain_compress_handler))
         .route("/api/v1/brain/feedback", post(brain_feedback_handler))
+        .route("/api/v1/paradise/status", get(paradise_status_handler))
+        .route("/api/v1/paradise/hash", post(paradise_hash_register_handler))
+        .route("/api/v1/paradise/hash/verify", post(paradise_hash_verify_handler))
+        .route("/api/v1/paradise/dataset", get(paradise_dataset_stats_handler))
+        .route("/api/v1/paradise/dataset/add", post(paradise_dataset_add_handler))
+        .route("/api/v1/autodev/status", get(autodev_status_handler))
+        .route("/api/v1/autodev/trigger", post(autodev_trigger_handler))
         .route("/api/v1/merkabah/align", get({
             let merkabah = merkabah.clone();
             move || merkabah_align_handler(merkabah)
@@ -1317,6 +1356,255 @@ async fn brain_feedback_handler(
         })),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
+}
+
+// === Paradise CLI Commands ===
+
+fn cmd_paradise() -> anyhow::Result<()> {
+    let hardware = apophy_universal::detect_hardware();
+    let env = paradise::build_paradise(&hardware);
+    println!("{}", paradise::format_paradise_status(&env));
+    Ok(())
+}
+
+fn cmd_autodev() -> anyhow::Result<()> {
+    let engine = autodev::AutoDevEngine::new(autodev::AutoDevEngineConfig::default());
+    println!("{}", engine.report());
+    Ok(())
+}
+
+fn cmd_dataset() -> anyhow::Result<()> {
+    let registry = paradise::DatasetRegistry::new();
+    let stats = registry.stats();
+    println!("=== Dataset Registry ===\n");
+    println!("Datasets:  {}", stats.total_datasets);
+    println!("Entries:   {}", stats.total_entries);
+    println!("Verified:  {}", stats.total_verified);
+    println!("Avg Quality: {:.0}%", stats.avg_quality * 100.0);
+    println!("Domains:   {:?}", stats.domains);
+    println!("\nUse the API to create and populate datasets:");
+    println!("  POST /api/v1/paradise/dataset/add");
+    println!("  GET  /api/v1/paradise/dataset");
+    Ok(())
+}
+
+// === Paradise API Handlers ===
+
+#[derive(Serialize)]
+struct ParadiseStatusResponse {
+    id: String,
+    name: String,
+    capability_score: f64,
+    capabilities: paradise::CapabilityMatrix,
+    fiber: paradise::NeutralFiber,
+    resources: paradise::ResourcePool,
+    hash_registry: paradise::RegistryManifest,
+    datasets: paradise::DatasetStats,
+    autodev_stats: autodev::PipelineStats,
+}
+
+async fn paradise_status_handler(
+    State(state): State<AppState>,
+) -> Json<ParadiseStatusResponse> {
+    let env = state.paradise.lock().unwrap();
+    let engine = state.autodev_engine.lock().unwrap();
+    let score = paradise::capability_score(&env.capabilities);
+    Json(ParadiseStatusResponse {
+        id: env.id.to_string(),
+        name: env.name.clone(),
+        capability_score: score,
+        capabilities: env.capabilities.clone(),
+        fiber: env.fiber.clone(),
+        resources: env.resources.clone(),
+        hash_registry: env.hash_registry.manifest(),
+        datasets: env.datasets.stats(),
+        autodev_stats: engine.stats(),
+    })
+}
+
+#[derive(Deserialize)]
+struct HashRegisterRequest {
+    content: String,
+    name: String,
+    artifact_type: String,
+    registered_by: String,
+}
+
+#[derive(Serialize)]
+struct HashRegisterResponse {
+    hash: String,
+    registered: bool,
+}
+
+async fn paradise_hash_register_handler(
+    State(state): State<AppState>,
+    Json(req): Json<HashRegisterRequest>,
+) -> Json<HashRegisterResponse> {
+    let mut env = state.paradise.lock().unwrap();
+    let artifact_type = match req.artifact_type.as_str() {
+        "prompt" => paradise::ArtifactType::Prompt,
+        "response" => paradise::ArtifactType::Response,
+        "dataset" => paradise::ArtifactType::Dataset,
+        "model" => paradise::ArtifactType::ModelWeight,
+        "config" => paradise::ArtifactType::Config,
+        "code" => paradise::ArtifactType::Code,
+        "document" => paradise::ArtifactType::Document,
+        "agent" => paradise::ArtifactType::Agent,
+        "schema" => paradise::ArtifactType::Schema,
+        _ => paradise::ArtifactType::Document,
+    };
+
+    let hash = env.hash_registry.register(&req.content, &req.name, artifact_type, &req.registered_by);
+    Json(HashRegisterResponse {
+        hash,
+        registered: true,
+    })
+}
+
+#[derive(Deserialize)]
+struct HashVerifyRequest {
+    content: String,
+    expected_hash: String,
+}
+
+#[derive(Serialize)]
+struct HashVerifyResponse {
+    valid: bool,
+    computed_hash: String,
+}
+
+async fn paradise_hash_verify_handler(
+    State(state): State<AppState>,
+    Json(req): Json<HashVerifyRequest>,
+) -> Json<HashVerifyResponse> {
+    let env = state.paradise.lock().unwrap();
+    let computed = paradise::compute_hash(&req.content);
+    let valid = env.hash_registry.verify(&req.content, &req.expected_hash);
+    Json(HashVerifyResponse {
+        valid,
+        computed_hash: computed,
+    })
+}
+
+async fn paradise_dataset_stats_handler(
+    State(state): State<AppState>,
+) -> Json<paradise::DatasetStats> {
+    let env = state.paradise.lock().unwrap();
+    Json(env.datasets.stats())
+}
+
+#[derive(Deserialize)]
+struct DatasetAddRequest {
+    dataset_name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default = "default_domain")]
+    domain: String,
+    prompt: String,
+    solution: String,
+    #[serde(default)]
+    verified: bool,
+    #[serde(default = "default_score")]
+    score: f64,
+    #[serde(default)]
+    difficulty: String,
+}
+
+fn default_score() -> f64 { 0.5 }
+
+#[derive(Serialize)]
+struct DatasetAddResponse {
+    hash: Option<String>,
+    dataset_name: String,
+    total_entries: usize,
+}
+
+async fn paradise_dataset_add_handler(
+    State(state): State<AppState>,
+    Json(req): Json<DatasetAddRequest>,
+) -> Json<DatasetAddResponse> {
+    let mut env = state.paradise.lock().unwrap();
+
+    // Create dataset if it doesn't exist
+    if !env.datasets.datasets.contains_key(&req.dataset_name) {
+        env.datasets.create_dataset(
+            &req.dataset_name,
+            &req.description,
+            &req.domain,
+            "api",
+        );
+    }
+
+    let hash = env.datasets.add_entry(
+        &req.dataset_name,
+        &req.prompt,
+        &req.solution,
+        req.verified,
+        req.score,
+        &req.difficulty,
+    );
+
+    Json(DatasetAddResponse {
+        hash,
+        dataset_name: req.dataset_name,
+        total_entries: env.datasets.total_entries,
+    })
+}
+
+// === AutoDev API Handlers ===
+
+async fn autodev_status_handler(
+    State(state): State<AppState>,
+) -> Json<autodev::PipelineStats> {
+    let engine = state.autodev_engine.lock().unwrap();
+    Json(engine.stats())
+}
+
+#[derive(Deserialize)]
+struct AutoDevTriggerRequest {
+    #[serde(default = "default_trigger")]
+    trigger: String,
+    #[serde(default)]
+    user: String,
+}
+
+fn default_trigger() -> String { "manual".to_string() }
+
+#[derive(Serialize)]
+struct AutoDevTriggerResponse {
+    run_id: String,
+    status: String,
+    message: String,
+}
+
+async fn autodev_trigger_handler(
+    State(state): State<AppState>,
+    Json(req): Json<AutoDevTriggerRequest>,
+) -> Json<AutoDevTriggerResponse> {
+    let mut engine = state.autodev_engine.lock().unwrap();
+    let trigger = autodev::PipelineTrigger::Manual {
+        user: if req.user.is_empty() { "api".to_string() } else { req.user },
+    };
+
+    let run = engine.start_run(trigger);
+    let run_id = run.id.to_string();
+
+    // Immediately record that we've started (actual execution is async)
+    engine.record_stage(
+        autodev::PipelineStage::Build,
+        autodev::StageStatus::Pending,
+        "Pipeline triggered via API",
+        0,
+    );
+
+    Json(AutoDevTriggerResponse {
+        run_id,
+        status: "started".to_string(),
+        message: format!(
+            "Pipeline triggered. Run: tools/autodeploy.sh {} for full execution.",
+            req.trigger
+        ),
+    })
 }
 
 // === MCP Handlers ===
