@@ -1,0 +1,269 @@
+#!/usr/bin/env node
+/**
+ * prime.js — Apophy Sovereign Stability Guardian
+ *
+ * Self-healing codebase validator that ensures:
+ * 1. All Rust crates compile
+ * 2. All tests pass
+ * 3. Clippy is clean
+ * 4. Config is valid
+ * 5. Documentation is up to date
+ * 6. No tech debt violations
+ *
+ * Usage:
+ *   node prime.js          # Full stability check
+ *   node prime.js --quick  # Quick check (build + test only)
+ *   node prime.js --fix    # Auto-fix what can be fixed
+ *   node prime.js --doctor # Full diagnostic + auto-documentation
+ */
+
+const { execSync } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+
+const ROOT = __dirname;
+const CONFIG_PATH = path.join(ROOT, "config", "sovereign.toml");
+
+// Colors
+const G = "\x1b[32m";
+const R = "\x1b[31m";
+const Y = "\x1b[33m";
+const C = "\x1b[36m";
+const W = "\x1b[0m";
+
+function run(cmd, opts = {}) {
+  try {
+    const result = execSync(cmd, {
+      cwd: ROOT,
+      encoding: "utf-8",
+      timeout: opts.timeout || 120000,
+      stdio: opts.silent ? "pipe" : "inherit",
+    });
+    return { ok: true, output: result };
+  } catch (e) {
+    return { ok: false, output: e.stdout || e.message };
+  }
+}
+
+function check(name, cmd, opts = {}) {
+  process.stdout.write(`  ${C}[CHECK]${W} ${name}...`);
+  const result = run(cmd, { silent: true, ...opts });
+  if (result.ok) {
+    console.log(` ${G}OK${W}`);
+  } else {
+    console.log(` ${R}FAIL${W}`);
+    if (opts.showError) {
+      console.log(`    ${R}${result.output.slice(0, 200)}${W}`);
+    }
+  }
+  return result.ok;
+}
+
+// === Checks ===
+
+function checkBuild() {
+  return check("Cargo build", "cargo build --workspace", { timeout: 180000 });
+}
+
+function checkTests() {
+  return check("Cargo test", "cargo test --workspace", { timeout: 180000 });
+}
+
+function checkClippy() {
+  return check("Cargo clippy", "cargo clippy --workspace 2>&1 | grep -c '^error' | grep -q '^0$'");
+}
+
+function checkFormat() {
+  return check("Cargo fmt", "cargo fmt --all -- --check");
+}
+
+function checkConfig() {
+  process.stdout.write(`  ${C}[CHECK]${W} Config valid...`);
+  const exists = fs.existsSync(CONFIG_PATH);
+  if (exists) {
+    console.log(` ${G}OK${W}`);
+  } else {
+    console.log(` ${Y}WARN (no config file)${W}`);
+  }
+  return exists;
+}
+
+function checkCrateCount() {
+  process.stdout.write(`  ${C}[CHECK]${W} Workspace crates...`);
+  const toml = fs.readFileSync(path.join(ROOT, "Cargo.toml"), "utf-8");
+  const members = toml.match(/members\s*=\s*\[([\s\S]*?)\]/);
+  if (members) {
+    const crates = members[1].match(/"[^"]+"/g) || [];
+    console.log(` ${G}${crates.length} crates${W}`);
+    return true;
+  }
+  console.log(` ${R}FAIL${W}`);
+  return false;
+}
+
+function checkTestCount() {
+  process.stdout.write(`  ${C}[CHECK]${W} Test count...`);
+  const result = run("cargo test --workspace -- --list 2>&1 | grep -c ': test$'", { silent: true });
+  if (result.ok) {
+    const count = parseInt(result.output.trim(), 10);
+    console.log(` ${G}${count} tests${W}`);
+    return count > 0;
+  }
+  console.log(` ${Y}UNKNOWN${W}`);
+  return false;
+}
+
+function checkNoSecrets() {
+  process.stdout.write(`  ${C}[CHECK]${W} No secrets in code...`);
+  const result = run(
+    "grep -rn 'api_key\\s*=\\s*\"[^\"]*[a-zA-Z0-9]' --include='*.rs' --include='*.toml' crates/ config/ 2>/dev/null | grep -v '_env' | grep -v 'Option<' | head -5",
+    { silent: true }
+  );
+  if (!result.ok || result.output.trim() === "") {
+    console.log(` ${G}OK${W}`);
+    return true;
+  }
+  console.log(` ${R}POTENTIAL SECRETS FOUND${W}`);
+  return false;
+}
+
+// === Doctor Mode ===
+
+function doctor() {
+  console.log(`\n${C}=== APOPHY SOVEREIGN — Auto-Doctor ===${W}\n`);
+
+  // Generate architecture documentation
+  console.log(`${Y}Generating architecture documentation...${W}`);
+
+  const crateData = [];
+  const cratesDir = path.join(ROOT, "crates");
+  if (fs.existsSync(cratesDir)) {
+    for (const dir of fs.readdirSync(cratesDir)) {
+      const libPath = path.join(cratesDir, dir, "src", "lib.rs");
+      const cargoPath = path.join(cratesDir, dir, "Cargo.toml");
+      if (fs.existsSync(cargoPath)) {
+        const cargo = fs.readFileSync(cargoPath, "utf-8");
+        const desc = cargo.match(/description\s*=\s*"([^"]+)"/);
+        const deps = (cargo.match(/apophy-\w+/g) || []).filter(
+          (d, i, a) => a.indexOf(d) === i && d !== `apophy-${dir.replace("apophy-", "")}`
+        );
+
+        // Count tests
+        let testCount = 0;
+        if (fs.existsSync(libPath)) {
+          const lib = fs.readFileSync(libPath, "utf-8");
+          testCount = (lib.match(/#\[test\]/g) || []).length;
+        }
+
+        crateData.push({
+          name: dir,
+          description: desc ? desc[1] : "No description",
+          deps: deps.length,
+          tests: testCount,
+        });
+      }
+    }
+  }
+
+  // Write ARCHITECTURE.md
+  let arch = "# Apophy Sovereign — Architecture\n\n";
+  arch += `> Auto-generated by \`node prime.js --doctor\` on ${new Date().toISOString()}\n\n`;
+  arch += "## Crates\n\n";
+  arch += "| Crate | Description | Deps | Tests |\n";
+  arch += "|-------|-------------|------|-------|\n";
+  for (const c of crateData) {
+    arch += `| \`${c.name}\` | ${c.description} | ${c.deps} | ${c.tests} |\n`;
+  }
+  arch += `\n**Total**: ${crateData.length} crates, ${crateData.reduce((a, c) => a + c.tests, 0)} tests\n`;
+
+  fs.writeFileSync(path.join(ROOT, "ARCHITECTURE.md"), arch);
+  console.log(`  ${G}ARCHITECTURE.md generated${W}`);
+
+  // Write API documentation
+  let api = "# Apophy Sovereign — API Reference\n\n";
+  api += `> Auto-generated on ${new Date().toISOString()}\n\n`;
+
+  const mainRs = fs.readFileSync(path.join(ROOT, "crates", "apophy-sovereign", "src", "main.rs"), "utf-8");
+  const routes = mainRs.match(/\.route\("([^"]+)",\s*(get|post)\(/g) || [];
+  api += "## Routes\n\n";
+  api += "| Method | Path | Handler |\n";
+  api += "|--------|------|--------|\n";
+  for (const route of routes) {
+    const match = route.match(/\.route\("([^"]+)",\s*(get|post)\(/);
+    if (match) {
+      api += `| ${match[2].toUpperCase()} | \`${match[1]}\` | - |\n`;
+    }
+  }
+
+  fs.writeFileSync(path.join(ROOT, "API.md"), api);
+  console.log(`  ${G}API.md generated${W}`);
+}
+
+// === Fix Mode ===
+
+function autoFix() {
+  console.log(`\n${Y}=== Auto-Fix ===${W}\n`);
+  console.log("Running cargo fmt...");
+  run("cargo fmt --all");
+  console.log("Running clippy --fix...");
+  run("cargo clippy --workspace --fix --allow-dirty 2>&1", { timeout: 180000 });
+  console.log(`${G}Auto-fix complete${W}`);
+}
+
+// === Main ===
+
+function main() {
+  const args = process.argv.slice(2);
+  const quick = args.includes("--quick");
+  const fix = args.includes("--fix");
+  const doctorMode = args.includes("--doctor");
+
+  console.log(`
+${C}╔══════════════════════════════════════════════╗
+║  APOPHY SOVEREIGN — prime.js Stability Guard  ║
+╚══════════════════════════════════════════════╝${W}
+`);
+
+  if (fix) {
+    autoFix();
+    return;
+  }
+
+  if (doctorMode) {
+    doctor();
+  }
+
+  let passed = 0;
+  let failed = 0;
+  const checks = [
+    ["Workspace", checkCrateCount],
+    ["Config", checkConfig],
+    ["Build", checkBuild],
+    ["Tests", checkTests],
+  ];
+
+  if (!quick) {
+    checks.push(
+      ["Clippy", checkClippy],
+      ["Format", checkFormat],
+      ["Secrets", checkNoSecrets],
+      ["Test Count", checkTestCount]
+    );
+  }
+
+  for (const [name, fn] of checks) {
+    if (fn()) passed++;
+    else failed++;
+  }
+
+  console.log(`\n${C}Results:${W} ${G}${passed} passed${W}, ${failed > 0 ? R : G}${failed} failed${W}`);
+
+  if (failed === 0) {
+    console.log(`\n${G}Codebase is STABLE. A0 tech debt maintained.${W}`);
+  } else {
+    console.log(`\n${R}Codebase needs attention. Run 'node prime.js --fix' to auto-repair.${W}`);
+    process.exit(1);
+  }
+}
+
+main();

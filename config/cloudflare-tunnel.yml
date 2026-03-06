@@ -1,0 +1,35 @@
+# Apophy Sovereign — Cloudflare Tunnel Routing
+# Zero-trust: no ports opened to the internet, tunnel-only access
+#
+# Setup:
+#   1. cloudflared tunnel login
+#   2. cloudflared tunnel create apophy-sovereign
+#   3. cloudflared tunnel route dns apophy-sovereign api.iagenticflow.org
+#   4. cloudflared tunnel route dns apophy-sovereign iagenticflow.org
+#   5. cloudflared tunnel route dns apophy-sovereign git.iagenticflow.org
+#   6. cloudflared tunnel route dns apophy-sovereign avatarvers.com
+#   7. Set CF_TUNNEL_TOKEN in .env or docker-compose environment
+#
+# DNS managed via Infomaniak (iagenticflow.org) + Cloudflare (tunnel CNAME)
+
+tunnel: apophy-sovereign
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  # Sovereign API + iAgenticFlow portal
+  - hostname: api.iagenticflow.org
+    service: http://apophy-sovereign:8080
+
+  - hostname: iagenticflow.org
+    service: http://apophy-sovereign:8080
+
+  # Self-hosted Gitea (open source git)
+  - hostname: git.iagenticflow.org
+    service: http://gitea:3000
+
+  # AvatarVers conference portal
+  - hostname: avatarvers.com
+    service: http://apophy-sovereign:8080
+
+  # Catch-all: reject unknown hostnames
+  - service: http_status:404

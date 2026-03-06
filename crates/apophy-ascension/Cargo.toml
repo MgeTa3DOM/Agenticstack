@@ -1,0 +1,20 @@
+[package]
+name = "apophy-ascension"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Creuset 5 - Merkabah consciousness synchronization engine"
+
+[dependencies]
+apophy-universal = { path = "../apophy-universal" }
+apophy-fuel = { path = "../apophy-fuel" }
+apophy-dream = { path = "../apophy-dream" }
+apophy-pineal = { path = "../apophy-pineal" }
+apophy-memory = { path = "../apophy-memory" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
