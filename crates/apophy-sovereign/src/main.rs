@@ -28,10 +28,14 @@ use tower_http::trace::TraceLayer;
 
 mod agents;
 mod autodev;
+mod avatar;
 mod config;
 mod db;
 mod infra;
+mod media;
 mod paradise;
+mod sandbox_vm;
+mod workflow;
 
 use config::SovereignConfig;
 
@@ -141,6 +145,18 @@ enum Commands {
 
     /// Show dataset registry summary
     Dataset,
+
+    /// Show media pipeline status (FFmpeg, transcoding, streaming, recording)
+    Media,
+
+    /// Show 3D avatar scene status (scene graph, avatars, autostream)
+    Avatar,
+
+    /// Show sandbox VM status (Firecracker, vision capture, running VMs)
+    Sandbox,
+
+    /// Show workflow orchestrator status (active workflows, step DAG, presets)
+    Workflow,
 }
 
 /// Application state shared across handlers (all fields are Send + Sync)
@@ -155,6 +171,10 @@ struct AppState {
     brain: Arc<std::sync::Mutex<apophy_inference::SovereignBrain>>,
     paradise: Arc<std::sync::Mutex<paradise::ParadiseEnv>>,
     autodev_engine: Arc<std::sync::Mutex<autodev::AutoDevEngine>>,
+    media_pipeline: Arc<std::sync::Mutex<media::MediaPipeline>>,
+    avatar_scene: Arc<std::sync::Mutex<avatar::AvatarScene>>,
+    sandbox_manager: Arc<std::sync::Mutex<sandbox_vm::SandboxManager>>,
+    workflow_orchestrator: Arc<std::sync::Mutex<workflow::WorkflowOrchestrator>>,
 }
 
 #[tokio::main]
@@ -190,6 +210,10 @@ async fn main() -> anyhow::Result<()> {
         Commands::Paradise => cmd_paradise(),
         Commands::AutoDev => cmd_autodev(),
         Commands::Dataset => cmd_dataset(),
+        Commands::Media => cmd_media(),
+        Commands::Avatar => cmd_avatar(),
+        Commands::Sandbox => cmd_sandbox(),
+        Commands::Workflow => cmd_workflow(),
     }
 }
 
@@ -294,6 +318,20 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
     // Initialize AutoDev engine
     let autodev_engine = autodev::AutoDevEngine::new(autodev::AutoDevEngineConfig::default());
 
+    // Initialize Media, Avatar, Sandbox, Workflow systems
+    let media_pipeline = media::MediaPipeline::new();
+    tracing::info!("Media: FFmpeg {}", if media_pipeline.available { "available" } else { "not found" });
+
+    let mut avatar_scene = avatar::AvatarScene::new();
+    avatar_scene.add_avatar("Apophy");
+    tracing::info!("Avatar: scene={} nodes, {} avatars", avatar_scene.scene_graph.node_count(), avatar_scene.avatars.len());
+
+    let sandbox_manager = sandbox_vm::SandboxManager::new(10);
+    tracing::info!("Sandbox: max={} VMs, firecracker={}", 10, sandbox_manager.firecracker_available);
+
+    let workflow_orchestrator = workflow::WorkflowOrchestrator::new(5);
+    tracing::info!("Workflow: max={} concurrent", 5);
+
     let state = AppState {
         config: config.clone(),
         hardware: hardware.clone(),
@@ -304,6 +342,10 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         brain: Arc::new(std::sync::Mutex::new(brain)),
         paradise: Arc::new(std::sync::Mutex::new(paradise_env)),
         autodev_engine: Arc::new(std::sync::Mutex::new(autodev_engine)),
+        media_pipeline: Arc::new(std::sync::Mutex::new(media_pipeline)),
+        avatar_scene: Arc::new(std::sync::Mutex::new(avatar_scene)),
+        sandbox_manager: Arc::new(std::sync::Mutex::new(sandbox_manager)),
+        workflow_orchestrator: Arc::new(std::sync::Mutex::new(workflow_orchestrator)),
     };
 
     // Initialize Merkabah (5 crucibles)
@@ -393,6 +435,11 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         .route("/api/v1/paradise/dataset/add", post(paradise_dataset_add_handler))
         .route("/api/v1/autodev/status", get(autodev_status_handler))
         .route("/api/v1/autodev/trigger", post(autodev_trigger_handler))
+        .route("/api/v1/media/status", get(media_status_handler))
+        .route("/api/v1/avatar/status", get(avatar_status_handler))
+        .route("/api/v1/sandbox/status", get(sandbox_status_handler))
+        .route("/api/v1/workflow/status", get(workflow_status_handler))
+        .route("/api/v1/workflow/presets", get(workflow_presets_handler))
         .route("/api/v1/merkabah/align", get({
             let merkabah = merkabah.clone();
             move || merkabah_align_handler(merkabah)
@@ -1650,4 +1697,109 @@ async fn merkabah_interact_handler(
         processed: true,
         crucibles_aligned: vehicle.crucible_alignment.aligned_count(),
     })
+}
+
+// === Media CLI + API ===
+
+fn cmd_media() -> anyhow::Result<()> {
+    let pipeline = media::MediaPipeline::new();
+    println!("{}", pipeline.report());
+    Ok(())
+}
+
+async fn media_status_handler(
+    State(state): State<AppState>,
+) -> Json<media::MediaPipelineStatus> {
+    let pipeline = state.media_pipeline.lock().unwrap();
+    Json(pipeline.status())
+}
+
+// === Avatar CLI + API ===
+
+fn cmd_avatar() -> anyhow::Result<()> {
+    let mut scene = avatar::AvatarScene::new();
+    scene.add_avatar("Apophy");
+    println!("{}", scene.report());
+    Ok(())
+}
+
+async fn avatar_status_handler(
+    State(state): State<AppState>,
+) -> Json<avatar::AvatarSceneStatus> {
+    let scene = state.avatar_scene.lock().unwrap();
+    Json(scene.status())
+}
+
+// === Sandbox CLI + API ===
+
+fn cmd_sandbox() -> anyhow::Result<()> {
+    let mgr = sandbox_vm::SandboxManager::new(10);
+    println!("{}", mgr.report());
+    Ok(())
+}
+
+async fn sandbox_status_handler(
+    State(state): State<AppState>,
+) -> Json<sandbox_vm::SandboxManagerStatus> {
+    let mgr = state.sandbox_manager.lock().unwrap();
+    Json(mgr.status())
+}
+
+// === Workflow CLI + API ===
+
+fn cmd_workflow() -> anyhow::Result<()> {
+    let mut orch = workflow::WorkflowOrchestrator::new(5);
+
+    // Show available presets
+    let presets = vec![
+        workflow::preset_avatar_stream_workflow(),
+        workflow::preset_sandbox_test_workflow(),
+        workflow::preset_media_pipeline_workflow(),
+        workflow::preset_full_pipeline_workflow(),
+    ];
+
+    println!("{}", orch.report());
+    println!("\n=== Available Workflow Presets ===\n");
+    for p in &presets {
+        println!("  [{}] {} — {} steps", p.name, p.description, p.steps.len());
+        for s in &p.steps {
+            let deps = if s.depends_on.is_empty() {
+                String::new()
+            } else {
+                format!(" (after: {})", s.depends_on.join(", "))
+            };
+            println!("    {} — {}{}", s.id, s.step_type.label(), deps);
+        }
+    }
+
+    // Create one default to show in report
+    let wf = orch.create_workflow("demo", "demo workflow");
+    let _ = wf.id; // suppress warning
+    println!("\n{}", orch.report());
+
+    Ok(())
+}
+
+async fn workflow_status_handler(
+    State(state): State<AppState>,
+) -> Json<workflow::OrchestratorStatus> {
+    let orch = state.workflow_orchestrator.lock().unwrap();
+    Json(orch.status())
+}
+
+async fn workflow_presets_handler() -> Json<Vec<workflow::WorkflowInfo>> {
+    let presets = vec![
+        workflow::preset_avatar_stream_workflow(),
+        workflow::preset_sandbox_test_workflow(),
+        workflow::preset_media_pipeline_workflow(),
+        workflow::preset_full_pipeline_workflow(),
+    ];
+    Json(presets.iter().map(|w| workflow::WorkflowInfo {
+        id: w.id.to_string(),
+        name: w.name.clone(),
+        status: w.status.to_string(),
+        steps: w.steps.len(),
+        progress: 0.0,
+        duration_ms: 0,
+    }).collect())
 }
