@@ -20,6 +20,7 @@ members = [
     "crates/apophy-sovereign",
     "crates/apophy-governance",
     "crates/apophy-inference",
+    "crates/apophy-solver",
 ]
 
 [workspace.package]

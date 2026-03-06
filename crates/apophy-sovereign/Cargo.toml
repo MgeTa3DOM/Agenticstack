@@ -28,6 +28,7 @@ apophy-harness = { path = "../apophy-harness" }
 apophy-browser = { path = "../apophy-browser" }
 apophy-governance = { path = "../apophy-governance" }
 apophy-inference = { path = "../apophy-inference" }
+apophy-solver = { path = "../apophy-solver" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -35,6 +35,7 @@ mod infra;
 mod media;
 mod paradise;
 mod sandbox_vm;
+mod solver_service;
 mod workflow;
 
 use config::SovereignConfig;
@@ -157,6 +158,25 @@ enum Commands {
 
     /// Show workflow orchestrator status (active workflows, step DAG, presets)
     Workflow,
+
+    /// Enterprise Problem Solver — diagnose, resolve, assess risk
+    Solver,
+
+    /// Solve a specific problem
+    Solve {
+        /// Problem title
+        #[arg(short, long)]
+        title: String,
+        /// Problem description
+        #[arg(short, long)]
+        description: String,
+        /// Domain (infrastructure, security, performance, compliance, financial, operations)
+        #[arg(long, default_value = "infrastructure")]
+        domain: String,
+        /// Severity (critical, high, medium, low, info)
+        #[arg(short, long, default_value = "medium")]
+        severity: String,
+    },
 }
 
 /// Application state shared across handlers (all fields are Send + Sync)
@@ -175,6 +195,7 @@ struct AppState {
     avatar_scene: Arc<std::sync::Mutex<avatar::AvatarScene>>,
     sandbox_manager: Arc<std::sync::Mutex<sandbox_vm::SandboxManager>>,
     workflow_orchestrator: Arc<std::sync::Mutex<workflow::WorkflowOrchestrator>>,
+    solver: Arc<std::sync::Mutex<apophy_solver::EnterpriseSolver>>,
 }
 
 #[tokio::main]
@@ -214,6 +235,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Avatar => cmd_avatar(),
         Commands::Sandbox => cmd_sandbox(),
         Commands::Workflow => cmd_workflow(),
+        Commands::Solver => cmd_solver(),
+        Commands::Solve { title, description, domain, severity } => cmd_solve(title, description, domain, severity),
     }
 }
 
@@ -332,6 +355,9 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
     let workflow_orchestrator = workflow::WorkflowOrchestrator::new(5);
     tracing::info!("Workflow: max={} concurrent", 5);
 
+    let solver = apophy_solver::EnterpriseSolver::new();
+    tracing::info!("Solver: enterprise problem solver ready (8 engines)");
+
     let state = AppState {
         config: config.clone(),
         hardware: hardware.clone(),
@@ -346,6 +372,7 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         avatar_scene: Arc::new(std::sync::Mutex::new(avatar_scene)),
         sandbox_manager: Arc::new(std::sync::Mutex::new(sandbox_manager)),
         workflow_orchestrator: Arc::new(std::sync::Mutex::new(workflow_orchestrator)),
+        solver: Arc::new(std::sync::Mutex::new(solver)),
     };
 
     // Initialize Merkabah (5 crucibles)
@@ -440,6 +467,11 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         .route("/api/v1/sandbox/status", get(sandbox_status_handler))
         .route("/api/v1/workflow/status", get(workflow_status_handler))
         .route("/api/v1/workflow/presets", get(workflow_presets_handler))
+        .route("/api/v1/solver/status", get(solver_service::solver_status_handler))
+        .route("/api/v1/solver/submit", post(solver_service::solver_submit_handler))
+        .route("/api/v1/solver/problems", get(solver_service::solver_problems_handler))
+        .route("/api/v1/solver/knowledge", get(solver_service::solver_knowledge_handler))
+        .route("/api/v1/solver/knowledge/search", post(solver_service::solver_knowledge_search_handler))
         .route("/api/v1/merkabah/align", get({
             let merkabah = merkabah.clone();
             move || merkabah_align_handler(merkabah)
@@ -1785,6 +1817,167 @@ async fn workflow_status_handler(
 ) -> Json<workflow::OrchestratorStatus> {
     let orch = state.workflow_orchestrator.lock().unwrap();
     Json(orch.status())
+}
+
+fn cmd_solver() -> anyhow::Result<()> {
+    let solver = apophy_solver::EnterpriseSolver::new();
+    let status = solver.status();
+
+    println!(r#"
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║       ENTERPRISE  PROBLEM  SOLVER                            ║
+║       Suite de Service Souveraine                            ║
+║                                                              ║
+║   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      ║
+║   │  DIAGNOSTIC  │→ │  RESOLUTION  │→ │   IMPACT     │      ║
+║   │   ENGINE     │  │   ENGINE     │  │  ANALYZER    │      ║
+║   └──────────────┘  └──────────────┘  └──────────────┘      ║
+║          ↓                ↓                 ↓                ║
+║   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      ║
+║   │  COMPLIANCE  │  │    RISK      │  │  KNOWLEDGE   │      ║
+║   │   CHECKER    │  │   MATRIX     │  │    BASE      │      ║
+║   └──────────────┘  └──────────────┘  └──────────────┘      ║
+║          ↓                ↓                                  ║
+║   ┌──────────────┐  ┌──────────────┐                        ║
+║   │     SLA      │  │  ESCALATION  │                        ║
+║   │   TRACKER    │  │   MANAGER    │                        ║
+║   └──────────────┘  └──────────────┘                        ║
+║                                                              ║
+║   Domains: 12  │  Frameworks: 8  │  SLA Policies: 5         ║
+║   Engines: 8   │  Risk Thresholds: 5                        ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+"#);
+
+    println!("=== Solver Status ===");
+    println!("Total Problems     : {}", status.total_problems);
+    println!("Open               : {}", status.open);
+    println!("Resolved           : {}", status.resolved);
+    println!("Escalated          : {}", status.escalated);
+    println!("Resolution Rate    : {:.1}%", status.resolution_rate_pct);
+    println!("Knowledge Entries  : {}", status.knowledge_entries);
+    println!("Compliance Frmwks  : {}", status.compliance_frameworks);
+    println!("Risk Thresholds    : {}", status.risk_thresholds);
+    println!("SLA Policies       : {}", status.sla_policies);
+
+    println!("\n--- JSON ---");
+    println!("{}", serde_json::to_string_pretty(&status)?);
+    Ok(())
+}
+
+fn cmd_solve(title: String, description: String, domain_str: String, severity_str: String) -> anyhow::Result<()> {
+    let domain = match domain_str.to_lowercase().as_str() {
+        "infrastructure" => apophy_solver::Domain::Infrastructure,
+        "security" => apophy_solver::Domain::Security,
+        "performance" => apophy_solver::Domain::Performance,
+        "data" | "data-integrity" | "dataintegrity" => apophy_solver::Domain::DataIntegrity,
+        "compliance" => apophy_solver::Domain::Compliance,
+        "financial" | "finance" => apophy_solver::Domain::Financial,
+        "operations" | "ops" => apophy_solver::Domain::Operations,
+        "hr" | "human-resources" => apophy_solver::Domain::HumanResources,
+        "cx" | "customer" | "customer-experience" => apophy_solver::Domain::CustomerExperience,
+        "supply-chain" | "supply" => apophy_solver::Domain::SupplyChain,
+        "legal" => apophy_solver::Domain::Legal,
+        "strategy" => apophy_solver::Domain::Strategy,
+        _ => apophy_solver::Domain::Infrastructure,
+    };
+
+    let severity = match severity_str.to_lowercase().as_str() {
+        "critical" => apophy_solver::Severity::Critical,
+        "high" => apophy_solver::Severity::High,
+        "medium" => apophy_solver::Severity::Medium,
+        "low" => apophy_solver::Severity::Low,
+        "info" => apophy_solver::Severity::Info,
+        _ => apophy_solver::Severity::Medium,
+    };
+
+    let mut solver = apophy_solver::EnterpriseSolver::new();
+    let report = solver.solve(&title, &description, domain, severity);
+
+    println!("╔══════════════════════════════════════════════════════════════╗");
+    println!("║           ENTERPRISE SOLVER — REPORT                        ║");
+    println!("╚══════════════════════════════════════════════════════════════╝\n");
+
+    println!("=== Problem ===");
+    println!("  Title    : {}", report.problem.title);
+    println!("  Severity : {}", report.problem.severity);
+    println!("  Domain   : {}", report.problem.domain);
+    println!("  Status   : {}", report.problem.status);
+
+    println!("\n=== Diagnosis ===");
+    println!("  Root Cause  : {}", report.diagnosis.root_cause);
+    println!("  Category    : {}", report.diagnosis.root_cause_category);
+    println!("  Confidence  : {:.0}%", report.diagnosis.confidence * 100.0);
+    if !report.diagnosis.contributing_factors.is_empty() {
+        println!("  Factors     :");
+        for f in &report.diagnosis.contributing_factors {
+            println!("    - {}", f);
+        }
+    }
+
+    println!("\n=== Risk Assessment ===");
+    println!("  Risk Score  : {:.0}%", report.risk_assessment.risk_score * 100.0);
+    println!("  Risk Level  : {}", report.risk_assessment.risk_level);
+    println!("  Probability : {:.0}%", report.risk_assessment.probability * 100.0);
+    println!("  Impact      : {:.0}%", report.risk_assessment.impact * 100.0);
+    println!("  Priority    : {}", report.risk_assessment.mitigation_priority);
+
+    println!("\n=== Impact Analysis ===");
+    println!("  Overall Score    : {:.0}%", report.impact.overall_impact_score * 100.0);
+    println!("  Blast Radius     : {} direct + {} indirect ({})",
+        report.impact.blast_radius.direct_systems,
+        report.impact.blast_radius.indirect_systems,
+        report.impact.blast_radius.total_scope);
+    println!("  Est. Cost/Hour   : ${:.0}", report.impact.estimated_cost_per_hour);
+    println!("  Affected Users   : ~{}", report.impact.affected_user_estimate);
+    if !report.impact.cascading_risks.is_empty() {
+        println!("  Cascading Risks  :");
+        for r in &report.impact.cascading_risks {
+            println!("    - {} (P={:.0}%, I={:.0}%)", r.description, r.probability * 100.0, r.impact_if_triggered * 100.0);
+        }
+    }
+
+    println!("\n=== Compliance ===");
+    println!("  Compliant : {}", if report.compliance_result.compliant { "YES" } else { "NO" });
+    for fc in &report.compliance_result.frameworks_checked {
+        if fc.applicable {
+            println!("  {} : {}", fc.framework, fc.status);
+        }
+    }
+    for v in &report.compliance_result.violations {
+        println!("  VIOLATION: [{}] {} — {}", v.control_id, v.framework, v.description);
+    }
+
+    println!("\n=== Solutions ({}) ===", report.resolution.solutions.len());
+    for (i, sol) in report.resolution.solutions.iter().enumerate() {
+        let marker = if i == report.resolution.recommended_idx { "★ RECOMMENDED" } else { "" };
+        println!("  [{}] {} ({}) {}", i + 1, sol.title, sol.solution_type, marker);
+        println!("      Effectiveness: {:.0}% | Effort: {}h ({} people) | Cost: ${:.0}",
+            sol.effectiveness_score * 100.0, sol.effort.hours, sol.effort.team_size, sol.effort.cost_estimate_usd);
+        for step in &sol.steps {
+            println!("      {}. {} ({})", step.order, step.action, step.owner);
+        }
+    }
+
+    println!("\n=== SLA ===");
+    println!("  Policy    : {}", report.sla.policy.name);
+    println!("  Status    : {}", report.sla.status);
+    println!("  Breach Risk : {:.1}%", report.sla.breach_risk_pct);
+
+    println!("\n=== Escalation ===");
+    println!("  Escalate  : {}", report.escalation.should_escalate);
+    println!("  Level     : {}", report.escalation.level);
+    for reason in &report.escalation.reasons {
+        println!("  Reason    : {}", reason);
+    }
+
+    println!("\n=== Summary ===");
+    println!("  {}", report.summary());
+
+    println!("\n--- JSON ---");
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
 }
 
 async fn workflow_presets_handler() -> Json<Vec<workflow::WorkflowInfo>> {

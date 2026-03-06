@@ -1,0 +1,18 @@
+[package]
+name = "apophy-solver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Sovereign Enterprise Problem Solver — diagnostic, resolution, compliance & risk engine"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
