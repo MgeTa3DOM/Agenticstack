@@ -3,7 +3,7 @@
 //! Quantifies the business impact of problems across multiple dimensions:
 //! revenue, users, reputation, operations, and compliance.
 
-use crate::{Diagnosis, Domain, Problem, RootCauseCategory, Severity};
+use crate::{Diagnosis, DiagnosticCategory, Domain, Problem, Severity};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -155,9 +155,9 @@ impl ImpactAnalyzer {
         };
 
         // Boost based on root cause
-        let boost = match diagnosis.root_cause_category {
-            RootCauseCategory::SecurityBreach => 1.2,
-            RootCauseCategory::DataCorruption => 1.15,
+        let boost = match diagnosis.category {
+            DiagnosticCategory::SecurityBreach => 1.2,
+            DiagnosticCategory::DataCorruption => 1.15,
             _ => 1.0,
         };
 
@@ -198,15 +198,15 @@ impl ImpactAnalyzer {
     ) -> Vec<CascadingRisk> {
         let mut risks = Vec::new();
 
-        match diagnosis.root_cause_category {
-            RootCauseCategory::ResourceExhaustion => {
+        match diagnosis.category {
+            DiagnosticCategory::ResourceExhaustion => {
                 risks.push(CascadingRisk {
                     description: "Service cascade failure — dependent services may fail".into(),
                     probability: 0.6,
                     impact_if_triggered: 0.9,
                 });
             }
-            RootCauseCategory::SecurityBreach => {
+            DiagnosticCategory::SecurityBreach => {
                 risks.push(CascadingRisk {
                     description: "Data exfiltration — sensitive data may be compromised".into(),
                     probability: 0.4,
@@ -218,7 +218,7 @@ impl ImpactAnalyzer {
                     impact_if_triggered: 0.95,
                 });
             }
-            RootCauseCategory::DataCorruption => {
+            DiagnosticCategory::DataCorruption => {
                 risks.push(CascadingRisk {
                     description: "Downstream data pollution — corrupted data propagates".into(),
                     probability: 0.5,

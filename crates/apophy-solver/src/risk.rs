@@ -3,7 +3,7 @@
 //! Enterprise risk assessment engine using configurable risk matrix.
 //! Computes composite risk scores and recommends mitigation priority.
 
-use crate::{Diagnosis, Domain, Problem, RootCauseCategory};
+use crate::{Diagnosis, DiagnosticCategory, Domain, Problem};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -94,11 +94,11 @@ impl RiskMatrix {
         });
 
         // Factor 2: Root cause exploitability
-        let exploitability = self.root_cause_risk(&diagnosis.root_cause_category);
+        let exploitability = self.root_cause_risk(&diagnosis.category);
         risk_factors.push(RiskFactor {
             name: "Exploitability".into(),
             score: exploitability,
-            description: format!("Root cause category: {}", diagnosis.root_cause_category),
+            description: format!("Root cause category: {}", diagnosis.category),
         });
 
         // Factor 3: Diagnosis confidence (inverse — low confidence = higher risk)
@@ -146,21 +146,20 @@ impl RiskMatrix {
         }
     }
 
-    fn root_cause_risk(&self, category: &RootCauseCategory) -> f64 {
+    fn root_cause_risk(&self, category: &DiagnosticCategory) -> f64 {
         match category {
-            RootCauseCategory::SecurityBreach => 0.95,
-            RootCauseCategory::DataCorruption => 0.85,
-            RootCauseCategory::ResourceExhaustion => 0.7,
-            RootCauseCategory::NetworkFailure => 0.65,
-            RootCauseCategory::CodeDefect => 0.6,
-            RootCauseCategory::ExternalDependency => 0.55,
-            RootCauseCategory::Configuration => 0.5,
-            RootCauseCategory::CapacityLimit => 0.45,
-            RootCauseCategory::HumanError => 0.4,
-            RootCauseCategory::DesignFlaw => 0.35,
-            RootCauseCategory::PolicyViolation => 0.3,
-            RootCauseCategory::ProcessGap => 0.25,
-            RootCauseCategory::Unknown => 0.5,
+            DiagnosticCategory::SecurityBreach => 0.95,
+            DiagnosticCategory::DataCorruption => 0.85,
+            DiagnosticCategory::ResourceExhaustion => 0.7,
+            DiagnosticCategory::DependencyFailure => 0.65,
+            DiagnosticCategory::IntegrationFailure => 0.6,
+            DiagnosticCategory::ExternalDisruption => 0.55,
+            DiagnosticCategory::ConfigurationDrift => 0.5,
+            DiagnosticCategory::CapacityLimit => 0.45,
+            DiagnosticCategory::HumanError => 0.4,
+            DiagnosticCategory::DesignFlaw => 0.35,
+            DiagnosticCategory::PolicyViolation => 0.3,
+            DiagnosticCategory::ProcessBottleneck => 0.25,
         }
     }
 

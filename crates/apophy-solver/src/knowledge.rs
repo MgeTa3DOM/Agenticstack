@@ -3,7 +3,7 @@
 //! Captures problem-solution pairs to accelerate future diagnosis.
 //! Enables pattern matching against historical resolutions.
 
-use crate::{Diagnosis, Problem, Resolution, RootCauseCategory};
+use crate::{Diagnosis, DiagnosticCategory, Problem, Resolution};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -49,7 +49,7 @@ impl KnowledgeBase {
             id: Uuid::new_v4(),
             problem_title: problem.title.clone(),
             problem_domain: problem.domain.to_string(),
-            root_cause_category: format!("{}", diagnosis.root_cause_category),
+            root_cause_category: format!("{}", diagnosis.category),
             root_cause: diagnosis.root_cause.clone(),
             solution_titles,
             tags: problem.tags.clone(),
@@ -81,7 +81,7 @@ impl KnowledgeBase {
         results.into_iter().map(|e| &*e).collect()
     }
 
-    pub fn search_by_category(&self, category: &RootCauseCategory) -> Vec<&KnowledgeEntry> {
+    pub fn search_by_category(&self, category: &DiagnosticCategory) -> Vec<&KnowledgeEntry> {
         let cat_str = format!("{}", category);
         self.entries.iter()
             .filter(|e| e.root_cause_category == cat_str)

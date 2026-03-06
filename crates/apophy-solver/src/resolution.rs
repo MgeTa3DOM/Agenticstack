@@ -3,7 +3,7 @@
 //! Generates actionable solutions based on diagnosis and risk assessment.
 //! Each solution includes effort estimation, prerequisites, and validation criteria.
 
-use crate::{Diagnosis, Domain, Problem, RiskAssessment, RootCauseCategory};
+use crate::{Diagnosis, DiagnosticCategory, Domain, Problem, RiskAssessment};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -89,7 +89,7 @@ pub struct ResolutionEngine {
 
 #[derive(Debug, Clone)]
 pub struct ResolutionTemplate {
-    pub cause_category: RootCauseCategory,
+    pub cause_category: DiagnosticCategory,
     pub solutions: Vec<SolutionTemplate>,
 }
 
@@ -136,7 +136,7 @@ impl ResolutionEngine {
         _risk: &RiskAssessment,
     ) -> Vec<Solution> {
         let matching_templates: Vec<&ResolutionTemplate> = self.templates.iter()
-            .filter(|t| t.cause_category == diagnosis.root_cause_category)
+            .filter(|t| t.cause_category == diagnosis.category)
             .collect();
 
         let mut solutions = Vec::new();
@@ -256,7 +256,7 @@ impl ResolutionEngine {
     fn build_templates() -> Vec<ResolutionTemplate> {
         vec![
             ResolutionTemplate {
-                cause_category: RootCauseCategory::ResourceExhaustion,
+                cause_category: DiagnosticCategory::ResourceExhaustion,
                 solutions: vec![
                     SolutionTemplate {
                         title: "Emergency resource scaling".into(),
@@ -275,7 +275,7 @@ impl ResolutionEngine {
                 ],
             },
             ResolutionTemplate {
-                cause_category: RootCauseCategory::Configuration,
+                cause_category: DiagnosticCategory::ConfigurationDrift,
                 solutions: vec![
                     SolutionTemplate {
                         title: "Fix misconfiguration".into(),
@@ -294,7 +294,7 @@ impl ResolutionEngine {
                 ],
             },
             ResolutionTemplate {
-                cause_category: RootCauseCategory::SecurityBreach,
+                cause_category: DiagnosticCategory::SecurityBreach,
                 solutions: vec![
                     SolutionTemplate {
                         title: "Incident containment".into(),
@@ -313,7 +313,7 @@ impl ResolutionEngine {
                 ],
             },
             ResolutionTemplate {
-                cause_category: RootCauseCategory::CapacityLimit,
+                cause_category: DiagnosticCategory::CapacityLimit,
                 solutions: vec![
                     SolutionTemplate {
                         title: "Caching and query optimization".into(),
@@ -332,7 +332,7 @@ impl ResolutionEngine {
                 ],
             },
             ResolutionTemplate {
-                cause_category: RootCauseCategory::DataCorruption,
+                cause_category: DiagnosticCategory::DataCorruption,
                 solutions: vec![
                     SolutionTemplate {
                         title: "Data repair and reconciliation".into(),
@@ -351,7 +351,7 @@ impl ResolutionEngine {
                 ],
             },
             ResolutionTemplate {
-                cause_category: RootCauseCategory::PolicyViolation,
+                cause_category: DiagnosticCategory::PolicyViolation,
                 solutions: vec![
                     SolutionTemplate {
                         title: "Immediate compliance remediation".into(),
@@ -370,7 +370,7 @@ impl ResolutionEngine {
                 ],
             },
             ResolutionTemplate {
-                cause_category: RootCauseCategory::NetworkFailure,
+                cause_category: DiagnosticCategory::DependencyFailure,
                 solutions: vec![
                     SolutionTemplate {
                         title: "Network path restoration".into(),
@@ -389,7 +389,7 @@ impl ResolutionEngine {
                 ],
             },
             ResolutionTemplate {
-                cause_category: RootCauseCategory::ProcessGap,
+                cause_category: DiagnosticCategory::ProcessBottleneck,
                 solutions: vec![
                     SolutionTemplate {
                         title: "Process patch".into(),
@@ -408,7 +408,7 @@ impl ResolutionEngine {
                 ],
             },
             ResolutionTemplate {
-                cause_category: RootCauseCategory::ExternalDependency,
+                cause_category: DiagnosticCategory::ExternalDisruption,
                 solutions: vec![
                     SolutionTemplate {
                         title: "Vendor failover".into(),
@@ -427,7 +427,7 @@ impl ResolutionEngine {
                 ],
             },
             ResolutionTemplate {
-                cause_category: RootCauseCategory::CodeDefect,
+                cause_category: DiagnosticCategory::IntegrationFailure,
                 solutions: vec![
                     SolutionTemplate {
                         title: "Hotfix deployment".into(),
@@ -446,7 +446,7 @@ impl ResolutionEngine {
                 ],
             },
             ResolutionTemplate {
-                cause_category: RootCauseCategory::HumanError,
+                cause_category: DiagnosticCategory::HumanError,
                 solutions: vec![
                     SolutionTemplate {
                         title: "Immediate correction".into(),
@@ -465,7 +465,7 @@ impl ResolutionEngine {
                 ],
             },
             ResolutionTemplate {
-                cause_category: RootCauseCategory::DesignFlaw,
+                cause_category: DiagnosticCategory::DesignFlaw,
                 solutions: vec![
                     SolutionTemplate {
                         title: "Targeted UX/design fix".into(),
@@ -484,7 +484,7 @@ impl ResolutionEngine {
                 ],
             },
             ResolutionTemplate {
-                cause_category: RootCauseCategory::Unknown,
+                cause_category: DiagnosticCategory::IntegrationFailure,
                 solutions: vec![
                     SolutionTemplate {
                         title: "Structured investigation".into(),
@@ -524,18 +524,7 @@ mod tests {
     fn test_fallback_solution() {
         let engine = ResolutionEngine::new();
         let p = Problem::new("Unknown", "Completely unknown issue", Domain::Strategy, crate::Severity::Low, "test");
-        let d = crate::Diagnosis {
-            id: Uuid::new_v4(),
-            problem_id: p.id,
-            root_cause: "Unknown".into(),
-            root_cause_category: RootCauseCategory::Unknown,
-            confidence: 0.1,
-            symptoms: vec![],
-            contributing_factors: vec![],
-            affected_components: vec![],
-            diagnostic_path: vec![],
-            created_at: Utc::now(),
-        };
+        let d = crate::DiagnosticEngine::new().diagnose(&p);
         let r = RiskMatrix::new().assess(&p, &d);
         let resolution = engine.resolve(&p, &d, &r);
         assert!(!resolution.solutions.is_empty());

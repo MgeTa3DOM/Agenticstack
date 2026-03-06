@@ -3,7 +3,7 @@
 //! Checks problems and solutions against regulatory frameworks
 //! (GDPR, SOC2, ISO27001, HIPAA, PCI-DSS, SOX).
 
-use crate::{Diagnosis, Domain, Problem, RootCauseCategory};
+use crate::{Diagnosis, DiagnosticCategory, Domain, Problem};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -205,8 +205,8 @@ impl ComplianceChecker {
         if !applicable {
             return (false, FrameworkStatus::NotApplicable, vec![], None);
         }
-        let is_breach = diagnosis.root_cause_category == RootCauseCategory::SecurityBreach
-            || diagnosis.root_cause_category == RootCauseCategory::DataCorruption;
+        let is_breach = diagnosis.category == DiagnosticCategory::SecurityBreach
+            || diagnosis.category == DiagnosticCategory::DataCorruption;
         if is_breach {
             (true, FrameworkStatus::Violation, vec!["Art. 33 — Breach notification".into(), "Art. 34 — Data subject notification".into()],
                 Some(Violation {
@@ -226,8 +226,8 @@ impl ComplianceChecker {
         if !applicable {
             return (false, FrameworkStatus::NotApplicable, vec![], None);
         }
-        let has_issue = diagnosis.root_cause_category == RootCauseCategory::SecurityBreach
-            || (problem.domain == Domain::Infrastructure && diagnosis.root_cause_category == RootCauseCategory::ResourceExhaustion);
+        let has_issue = diagnosis.category == DiagnosticCategory::SecurityBreach
+            || (problem.domain == Domain::Infrastructure && diagnosis.category == DiagnosticCategory::ResourceExhaustion);
         if has_issue {
             (true, FrameworkStatus::Warning, vec!["CC6.1 — Logical access".into(), "CC7.2 — System monitoring".into()],
                 Some(Violation {
@@ -243,7 +243,7 @@ impl ComplianceChecker {
     }
 
     fn check_iso27001(&self, _problem: &Problem, diagnosis: &Diagnosis) -> (bool, FrameworkStatus, Vec<String>, Option<Violation>) {
-        let is_security = diagnosis.root_cause_category == RootCauseCategory::SecurityBreach;
+        let is_security = diagnosis.category == DiagnosticCategory::SecurityBreach;
         if is_security {
             (true, FrameworkStatus::Warning, vec!["A.16.1 — Incident management".into(), "A.12.4 — Logging and monitoring".into()],
                 Some(Violation {
@@ -263,8 +263,8 @@ impl ComplianceChecker {
         if !applicable {
             return (false, FrameworkStatus::NotApplicable, vec![], None);
         }
-        let is_phi_risk = diagnosis.root_cause_category == RootCauseCategory::DataCorruption
-            || diagnosis.root_cause_category == RootCauseCategory::SecurityBreach;
+        let is_phi_risk = diagnosis.category == DiagnosticCategory::DataCorruption
+            || diagnosis.category == DiagnosticCategory::SecurityBreach;
         if is_phi_risk {
             (true, FrameworkStatus::Violation, vec!["§164.308 — Administrative safeguards".into()],
                 Some(Violation {
@@ -284,7 +284,7 @@ impl ComplianceChecker {
         if !applicable {
             return (false, FrameworkStatus::NotApplicable, vec![], None);
         }
-        if diagnosis.root_cause_category == RootCauseCategory::SecurityBreach {
+        if diagnosis.category == DiagnosticCategory::SecurityBreach {
             (true, FrameworkStatus::Violation, vec!["Req 10 — Track and monitor access".into(), "Req 12 — Security policy".into()],
                 Some(Violation {
                     framework: ComplianceFramework::PCIDSS,
@@ -311,7 +311,7 @@ impl ComplianceChecker {
     }
 
     fn check_nist(&self, _problem: &Problem, diagnosis: &Diagnosis) -> (bool, FrameworkStatus, Vec<String>, Option<Violation>) {
-        let is_security = diagnosis.root_cause_category == RootCauseCategory::SecurityBreach;
+        let is_security = diagnosis.category == DiagnosticCategory::SecurityBreach;
         if is_security {
             (true, FrameworkStatus::Warning, vec!["DE.CM — Security continuous monitoring".into(), "RS.RP — Response planning".into()], None)
         } else {
@@ -324,7 +324,7 @@ impl ComplianceChecker {
         if !applicable {
             return (false, FrameworkStatus::NotApplicable, vec![], None);
         }
-        if diagnosis.root_cause_category == RootCauseCategory::SecurityBreach {
+        if diagnosis.category == DiagnosticCategory::SecurityBreach {
             (true, FrameworkStatus::Violation, vec!["§1798.150 — Data breach".into()],
                 Some(Violation {
                     framework: ComplianceFramework::CCPA,
