@@ -160,6 +160,9 @@ enum Commands {
     /// Show workflow orchestrator status (active workflows, step DAG, presets)
     Workflow,
 
+    /// Show Masters panel status (TimeMaster, SpaceMaster, LatentMaster)
+    Masters,
+
     /// Enterprise Problem Solver — diagnose, resolve, assess risk
     Solver,
 
@@ -214,6 +217,7 @@ struct AppState {
     sandbox_manager: Arc<std::sync::Mutex<sandbox_vm::SandboxManager>>,
     workflow_orchestrator: Arc<std::sync::Mutex<workflow::WorkflowOrchestrator>>,
     solver: Arc<std::sync::Mutex<apophy_solver::EnterpriseSolver>>,
+    masters_panel: Arc<std::sync::Mutex<apophy_masters::MastersPanel>>,
 }
 
 #[tokio::main]
@@ -253,6 +257,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Avatar => cmd_avatar(),
         Commands::Sandbox => cmd_sandbox(),
         Commands::Workflow => cmd_workflow(),
+        Commands::Masters => cmd_masters(),
         Commands::Solver => cmd_solver(),
         Commands::Solve { title, description, domain, severity } => cmd_solve(title, description, domain, severity),
         Commands::Execute { instruction, domain, tier, max_tokens } => cmd_execute(instruction, domain, tier, max_tokens),
@@ -390,6 +395,12 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
     let solver = apophy_solver::EnterpriseSolver::new();
     tracing::info!("Solver: enterprise problem solver ready (8 engines)");
 
+    let masters_panel = apophy_masters::MastersPanel::new(
+        hardware.cpu_cores as usize,
+        hardware.memory_mb as usize,
+    );
+    tracing::info!("Masters: TimeMaster + SpaceMaster + LatentMaster ready ({}CPU, {}MB)", hardware.cpu_cores, hardware.memory_mb);
+
     let brain_arc = Arc::new(std::sync::Mutex::new(brain));
     let agent_runtime = Arc::new(runtime::AgentRuntime::new(brain_arc.clone()));
     tracing::info!("Runtime: agent execution engine ready (governance + verification + tracing)");
@@ -410,6 +421,7 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         sandbox_manager: Arc::new(std::sync::Mutex::new(sandbox_manager)),
         workflow_orchestrator: Arc::new(std::sync::Mutex::new(workflow_orchestrator)),
         solver: Arc::new(std::sync::Mutex::new(solver)),
+        masters_panel: Arc::new(std::sync::Mutex::new(masters_panel)),
     };
 
     // Initialize Merkabah (5 crucibles)
@@ -506,6 +518,8 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         .route("/api/v1/sandbox/status", get(sandbox_status_handler))
         .route("/api/v1/workflow/status", get(workflow_status_handler))
         .route("/api/v1/workflow/presets", get(workflow_presets_handler))
+        .route("/api/v1/masters/status", get(masters_status_handler))
+        .route("/api/v1/masters/report", get(masters_report_handler))
         .route("/api/v1/solver/status", get(solver_service::solver_status_handler))
         .route("/api/v1/solver/submit", post(solver_service::solver_submit_handler))
         .route("/api/v1/solver/problems", get(solver_service::solver_problems_handler))
@@ -1907,6 +1921,35 @@ async fn workflow_status_handler(
 ) -> Json<workflow::OrchestratorStatus> {
     let orch = state.workflow_orchestrator.lock().unwrap();
     Json(orch.status())
+}
+
+fn cmd_masters() -> anyhow::Result<()> {
+    let panel = apophy_masters::MastersPanel::new(24, 96_000);
+    println!(r#"
++=====================================================+
+|  MASTERS PANEL — Triple Orchestration Layer         |
+|                                                     |
+|  TimeMaster:   Temporal scheduling & rate limiting  |
+|  SpaceMaster:  Spatial distribution across cores    |
+|  LatentMaster: Pattern detection & optimization     |
++=====================================================+
+"#);
+    println!("{}", panel.report());
+    Ok(())
+}
+
+async fn masters_status_handler(
+    State(state): State<AppState>,
+) -> Json<apophy_masters::MastersPanelStatus> {
+    let panel = state.masters_panel.lock().unwrap();
+    Json(panel.status())
+}
+
+async fn masters_report_handler(
+    State(state): State<AppState>,
+) -> String {
+    let panel = state.masters_panel.lock().unwrap();
+    panel.report()
 }
 
 fn cmd_solver() -> anyhow::Result<()> {

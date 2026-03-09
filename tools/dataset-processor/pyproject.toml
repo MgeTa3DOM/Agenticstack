@@ -1,0 +1,20 @@
+[project]
+name = "apophy-dataset-processor"
+version = "0.1.0"
+description = "PDF/CSV/MD → mini-datasets for 3000 agent specialization"
+requires-python = ">=3.10"
+
+[project.scripts]
+apophy-dataset = "processor:main"
+
+[project.optional-dependencies]
+full = [
+    "pandas>=2.0",
+    "pdfplumber>=0.10",
+    "markdown>=3.5",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0",
+]

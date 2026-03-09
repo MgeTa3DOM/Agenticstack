@@ -276,6 +276,118 @@ def full_pipeline(
     print("=" * 60)
 
 
+# === ONNX Export for Browser Inference (Gemma3 270M) ===
+
+def export_onnx(
+    checkpoint_dir: str = "checkpoints/azr-ctm",
+    output_dir: str = "models/onnx/",
+    quantize: bool = True,
+):
+    """Export fine-tuned model to ONNX format for browser inference via Transformers.js/WebGPU.
+
+    Target: Gemma3 270M parameters, optimized for in-browser execution.
+    """
+    try:
+        from optimum.exporters.onnx import main_export
+    except ImportError:
+        print("Missing optimum. Install with: uv pip install optimum onnx onnxruntime")
+        sys.exit(1)
+
+    print(f"=== ONNX Export for Browser AI ===")
+    print(f"Checkpoint: {checkpoint_dir}")
+    print(f"Output: {output_dir}")
+    print(f"Quantize: {quantize}")
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Export to ONNX
+    main_export(
+        model_name_or_path=checkpoint_dir,
+        output=output_dir,
+        task="text-generation",
+    )
+
+    # Quantize for smaller browser payload
+    if quantize:
+        try:
+            from onnxruntime.quantization import quantize_dynamic, QuantType
+            import glob as globmod
+
+            for onnx_file in globmod.glob(os.path.join(output_dir, "*.onnx")):
+                quantized = onnx_file.replace(".onnx", "_q4.onnx")
+                quantize_dynamic(
+                    onnx_file,
+                    quantized,
+                    weight_type=QuantType.QUInt8,
+                )
+                print(f"  Quantized: {quantized}")
+        except ImportError:
+            print("  [WARN] onnxruntime not available for quantization")
+
+    print(f"\nONNX export complete: {output_dir}")
+    print("  Deploy to browser via Transformers.js:")
+    print("    import { pipeline } from '@xenova/transformers';")
+    print(f"    const generator = await pipeline('text-generation', '{output_dir}');")
+
+
+# === Gemma3 270M Specialization Pipeline ===
+
+def specialize_gemma3(
+    mini_dataset_dir: str = "data/mini/",
+    base_model: str = "google/gemma-3-270m",
+    output_dir: str = "models/specialized/",
+    max_agents: int = 100,
+):
+    """Fine-tune Gemma3 270M for each agent specialization.
+
+    Creates one LoRA adapter per agent domain, exported to ONNX for browser inference.
+    Designed for the 3000 micro-agent architecture where each agent runs in-browser.
+    """
+    print(f"=== Gemma3 270M Agent Specialization ===")
+    print(f"Dataset dir: {mini_dataset_dir}")
+    print(f"Base model: {base_model}")
+    print(f"Max agents: {max_agents}")
+
+    dataset_path = Path(mini_dataset_dir)
+    if not dataset_path.exists():
+        print(f"  [ERROR] Dataset directory not found: {mini_dataset_dir}")
+        print("  Run: python tools/dataset-processor/processor.py pipeline --input data/raw/")
+        return
+
+    domains = [d for d in dataset_path.iterdir() if d.is_dir()]
+    print(f"  Found {len(domains)} domains")
+
+    trained = 0
+    for domain_dir in domains:
+        domain = domain_dir.name
+        agent_files = sorted(domain_dir.glob("*.jsonl"))[:max_agents // len(domains)]
+
+        for agent_file in agent_files:
+            agent_id = agent_file.stem
+            agent_output = os.path.join(output_dir, domain, agent_id)
+            os.makedirs(agent_output, exist_ok=True)
+
+            print(f"  [{trained + 1}] Training {agent_id} (domain: {domain})")
+
+            try:
+                train_qlora(
+                    dataset_path=str(agent_file),
+                    base_model=base_model,
+                    output_dir=agent_output,
+                    epochs=2,
+                    batch_size=2,
+                    lora_r=8,
+                    lora_alpha=16,
+                    max_seq_length=1024,
+                )
+                trained += 1
+            except Exception as e:
+                print(f"    [SKIP] {agent_id}: {e}")
+
+    print(f"\nSpecialization complete: {trained} agents trained")
+    print(f"Output: {output_dir}")
+
+
 # === CLI ===
 
 def main():
@@ -315,6 +427,19 @@ def main():
     pipe.add_argument("--output", default="models/sovereign.gguf")
     pipe.add_argument("--domain", default="reasoning")
 
+    # ONNX export for browser
+    onnx = subparsers.add_parser("export-onnx", help="Export to ONNX for browser inference")
+    onnx.add_argument("--checkpoint", default="checkpoints/azr-ctm")
+    onnx.add_argument("--output", default="models/onnx/")
+    onnx.add_argument("--no-quantize", action="store_true")
+
+    # Gemma3 specialization
+    spec = subparsers.add_parser("specialize", help="Fine-tune Gemma3 270M per-agent")
+    spec.add_argument("--dataset-dir", default="data/mini/")
+    spec.add_argument("--base-model", default="google/gemma-3-270m")
+    spec.add_argument("--output", default="models/specialized/")
+    spec.add_argument("--max-agents", type=int, default=100)
+
     args = parser.parse_args()
 
     if args.command == "generate":
@@ -339,6 +464,19 @@ def main():
             checkpoint_dir=args.checkpoint,
             output_path=args.output,
             quantization=args.quantization,
+        )
+    elif args.command == "export-onnx":
+        export_onnx(
+            checkpoint_dir=args.checkpoint,
+            output_dir=args.output,
+            quantize=not args.no_quantize,
+        )
+    elif args.command == "specialize":
+        specialize_gemma3(
+            mini_dataset_dir=args.dataset_dir,
+            base_model=args.base_model,
+            output_dir=args.output,
+            max_agents=args.max_agents,
         )
     elif args.command == "pipeline":
         full_pipeline(

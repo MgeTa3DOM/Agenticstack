@@ -1,7 +1,7 @@
 [project]
 name = "apophy-finetune"
 version = "0.1.0"
-description = "AZR-CTM AutoFineTune Loop for Apophy Sovereign"
+description = "AZR-CTM AutoFineTune Loop for Apophy Sovereign — supports Gemma3 270M browser inference"
 requires-python = ">=3.10"
 dependencies = [
     "unsloth>=2024.8",
@@ -11,6 +11,13 @@ dependencies = [
     "accelerate>=0.27",
     "bitsandbytes>=0.42",
     "requests>=2.31",
+]
+
+[project.optional-dependencies]
+browser = [
+    "onnx>=1.15",
+    "onnxruntime>=1.17",
+    "optimum>=1.17",
 ]
 
 [project.scripts]

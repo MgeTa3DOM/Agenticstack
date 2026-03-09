@@ -21,6 +21,7 @@ members = [
     "crates/apophy-governance",
     "crates/apophy-inference",
     "crates/apophy-solver",
+    "crates/apophy-masters",
 ]
 
 [workspace.package]

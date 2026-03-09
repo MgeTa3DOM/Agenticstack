@@ -87,6 +87,71 @@ max_agents = 3000
 auto_spawn = true
 domains_enabled = ["startups", "tech", "support", "sales", "hr", "marketing", "ecommerce", "pm", "legal"]
 
+# === Multi-Runtime Architecture ===
+# 3000 micro-agents (Gemma3 270M, browser) + 200 business agents (Gemini/Claude)
+
+[fleet.micro_agents]
+count = 3000
+model = "gemma3-270m"
+runtime = "browser"
+inference = "onnx-webgpu"
+prompts_per_agent = 75
+dataset_dir = "data/mini/"
+specialized_models_dir = "models/specialized/"
+
+[fleet.business_agents]
+count = 200
+model = "gemini-pro"
+fallback_model = "claude-sonnet"
+runtime = "server"
+prompts_per_agent = 750
+dataset_dir = "data/business/"
+router = "routellm"
+
+# === Masters — Triple Orchestration Layer ===
+
+[masters]
+enabled = true
+
+[masters.time]
+max_tasks_per_second = 100
+agent_cooldown_ms = 500
+max_queue_depth = 10000
+overdue_threshold_ms = 30000
+
+[masters.space]
+# OVH VPS allocation: 24 CPU / 96 GB RAM / 400 GB SSD
+core_engine_cores = 8
+agent_pool_cores = 8
+dashboard_cores = 4
+browser_ai_cores = 4
+
+[masters.latent]
+learning_enabled = true
+batch_threshold = 10
+pattern_min_observations = 5
+
+# === Browser AI (Playwright + Gemma3) ===
+
+[browser_ai]
+enabled = true
+headless = true
+deterministic = true
+max_concurrent_browsers = 4
+screenshot_on_error = true
+
+[browser_ai.playwright]
+browser = "chromium"
+timeout_ms = 30000
+viewport_width = 1920
+viewport_height = 1080
+
+[browser_ai.gemma3]
+model_path = "models/onnx/gemma3-270m"
+quantization = "q4"
+max_tokens = 512
+inference_target = "webgpu"
+
 [[infra.cloudflare.routes]]
 hostname = "api.iagenticflow.org"
 service = "http://localhost:8080"
