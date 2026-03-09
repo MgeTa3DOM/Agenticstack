@@ -28,6 +28,7 @@
 //! ```
 
 pub mod backend;
+pub mod http_backend;
 pub mod alpha_resolve;
 pub mod azr;
 pub mod ctmc;
@@ -37,8 +38,9 @@ pub mod toon;
 pub use backend::{
     InferenceBackend, InferenceRequest, InferenceResponse,
     GgufBackend, GgufConfig, StubBackend,
-    GenerationParams, TokenUsage,
+    GenerationParams, TokenUsage, FinishReason,
 };
+pub use http_backend::{HttpBackend, HttpBackendConfig};
 pub use alpha_resolve::{AlphaResolve, AlphaResolveConfig, ResolveResult, ResolveStep};
 pub use azr::{AbsoluteZeroReasoner, AzrConfig, AzrEpisode, AzrTask, TaskDifficulty};
 pub use ctmc::{CtmcCompressor, CtmcConfig, CompressedThought, CompressionStats};

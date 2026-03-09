@@ -34,6 +34,7 @@ mod db;
 mod infra;
 mod media;
 mod paradise;
+mod runtime;
 mod sandbox_vm;
 mod solver_service;
 mod workflow;
@@ -177,6 +178,22 @@ enum Commands {
         #[arg(short, long, default_value = "medium")]
         severity: String,
     },
+
+    /// Execute an agent task (the core feature)
+    Execute {
+        /// Task instruction
+        #[arg(short, long)]
+        instruction: String,
+        /// Domain (tech_web_dev, sales, marketing, legal, etc.)
+        #[arg(long)]
+        domain: Option<String>,
+        /// Tier (strategic, tactical, operational)
+        #[arg(long)]
+        tier: Option<String>,
+        /// Max response tokens
+        #[arg(long, default_value = "2048")]
+        max_tokens: usize,
+    },
 }
 
 /// Application state shared across handlers (all fields are Send + Sync)
@@ -189,6 +206,7 @@ struct AppState {
     db: Arc<std::sync::Mutex<db::SovereignDb>>,
     http_client: reqwest::Client,
     brain: Arc<std::sync::Mutex<apophy_inference::SovereignBrain>>,
+    agent_runtime: Arc<runtime::AgentRuntime>,
     paradise: Arc<std::sync::Mutex<paradise::ParadiseEnv>>,
     autodev_engine: Arc<std::sync::Mutex<autodev::AutoDevEngine>>,
     media_pipeline: Arc<std::sync::Mutex<media::MediaPipeline>>,
@@ -237,6 +255,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Workflow => cmd_workflow(),
         Commands::Solver => cmd_solver(),
         Commands::Solve { title, description, domain, severity } => cmd_solve(title, description, domain, severity),
+        Commands::Execute { instruction, domain, tier, max_tokens } => cmd_execute(instruction, domain, tier, max_tokens),
     }
 }
 
@@ -288,6 +307,7 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
     );
 
     // Initialize SovereignBrain (local inference engine)
+    // Priority: 1. GGUF model  2. Ollama HTTP  3. Stub fallback
     let brain = {
         let gguf_config = apophy_inference::GgufConfig::auto(
             &config.ai.model_path,
@@ -300,8 +320,20 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
                     Box::new(b)
                 }
                 _ => {
-                    tracing::info!("Brain: Stub backend (no GGUF model found — download a .gguf to enable local inference)");
-                    Box::new(apophy_inference::StubBackend::new(&config.ai.model_name))
+                    // Try Ollama (local HTTP, free, no cloud)
+                    let ollama_config = apophy_inference::HttpBackendConfig::ollama(&config.ai.model_name);
+                    match apophy_inference::HttpBackend::new(ollama_config) {
+                        Ok(http_backend) => {
+                            tracing::info!("Brain: HTTP backend (Ollama at localhost:11434, model: {})", config.ai.model_name);
+                            tracing::info!("  -> Install Ollama: curl -fsSL https://ollama.com/install.sh | sh");
+                            tracing::info!("  -> Pull model: ollama pull {}", config.ai.model_name);
+                            Box::new(http_backend)
+                        }
+                        Err(_) => {
+                            tracing::info!("Brain: Stub backend (install Ollama for real inference)");
+                            Box::new(apophy_inference::StubBackend::new(&config.ai.model_name))
+                        }
+                    }
                 }
             };
         apophy_inference::SovereignBrain::new(backend, hardware.clone())
@@ -358,6 +390,10 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
     let solver = apophy_solver::EnterpriseSolver::new();
     tracing::info!("Solver: enterprise problem solver ready (8 engines)");
 
+    let brain_arc = Arc::new(std::sync::Mutex::new(brain));
+    let agent_runtime = Arc::new(runtime::AgentRuntime::new(brain_arc.clone()));
+    tracing::info!("Runtime: agent execution engine ready (governance + verification + tracing)");
+
     let state = AppState {
         config: config.clone(),
         hardware: hardware.clone(),
@@ -365,7 +401,8 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         start_time: std::time::Instant::now(),
         db: Arc::new(std::sync::Mutex::new(sovereign_db)),
         http_client,
-        brain: Arc::new(std::sync::Mutex::new(brain)),
+        brain: brain_arc,
+        agent_runtime,
         paradise: Arc::new(std::sync::Mutex::new(paradise_env)),
         autodev_engine: Arc::new(std::sync::Mutex::new(autodev_engine)),
         media_pipeline: Arc::new(std::sync::Mutex::new(media_pipeline)),
@@ -447,6 +484,8 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         .route("/api/v1/fleet/catalog", get(fleet_catalog_handler))
         .route("/api/v1/fleet/spawn", post(fleet_spawn_handler))
         .route("/api/v1/fleet/domains", get(fleet_domains_handler))
+        .route("/api/v1/fleet/execute", post(fleet_execute_handler))
+        .route("/api/v1/fleet/runtime", get(fleet_runtime_handler))
         .route("/api/v1/mcp/config", get(mcp_config_handler))
         .route("/api/v1/mcp/tools", get(mcp_tools_handler))
         .route("/api/v1/brain/status", get(brain_status_handler))
@@ -1060,6 +1099,57 @@ async fn fleet_spawn_handler(
         operational: operational_total,
         message: format!("Divine Synarchy: {} agents deployed across {} domains", total, agents::AgentDomain::all().len()),
     }))
+}
+
+// === Fleet Execute Handler — THE CORE ===
+
+async fn fleet_execute_handler(
+    State(state): State<AppState>,
+    Json(req): Json<runtime::AgentTask>,
+) -> std::result::Result<Json<runtime::AgentResult>, StatusCode> {
+    if !state.config.fleet.enabled {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    // Get agents for routing
+    let available_agents = agents::generate_strategic_agents()
+        .into_iter()
+        .chain(
+            agents::AgentDomain::all()
+                .iter()
+                .flat_map(|d| agents::generate_tactical_agents(*d))
+        )
+        .collect::<Vec<_>>();
+
+    // Execute through governed runtime
+    let result = state.agent_runtime.execute(&req, &available_agents);
+
+    // Log to DB
+    if let Ok(db) = state.db.lock() {
+        let _ = db.audit_log(
+            "agent_execute",
+            Some(&result.agent_id),
+            &format!(
+                "task={} agent={} status={:?} verified={} tokens={}",
+                result.task_id, result.agent_name, result.status,
+                result.verified, result.trace.input_tokens + result.trace.output_tokens
+            ),
+        );
+    }
+
+    tracing::info!(
+        "Agent executed: {} ({}) -> {:?} ({}ms, verified={})",
+        result.agent_name, result.domain, result.status,
+        result.trace.latency_ms, result.verified
+    );
+
+    Ok(Json(result))
+}
+
+async fn fleet_runtime_handler(
+    State(state): State<AppState>,
+) -> Json<runtime::RuntimeStats> {
+    Json(state.agent_runtime.stats())
 }
 
 // === Fleet CLI Commands ===
@@ -1977,6 +2067,83 @@ fn cmd_solve(title: String, description: String, domain_str: String, severity_st
 
     println!("\n--- JSON ---");
     println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
+}
+
+fn cmd_execute(instruction: String, domain: Option<String>, tier: Option<String>, max_tokens: usize) -> anyhow::Result<()> {
+    let hardware = apophy_universal::detect_hardware();
+
+    // Try Ollama first, then stub
+    let ollama_config = apophy_inference::HttpBackendConfig::ollama("llama3.2");
+    let backend: Box<dyn apophy_inference::InferenceBackend + Send + Sync> =
+        match apophy_inference::HttpBackend::new(ollama_config) {
+            Ok(b) => {
+                println!("Backend: Ollama HTTP (localhost:11434)");
+                Box::new(b)
+            }
+            Err(_) => {
+                println!("Backend: Stub (install Ollama for real inference)");
+                Box::new(apophy_inference::StubBackend::new("sovereign-local"))
+            }
+        };
+
+    let brain = apophy_inference::SovereignBrain::new(backend, hardware);
+    let brain_arc = Arc::new(std::sync::Mutex::new(brain));
+    let rt = runtime::AgentRuntime::new(brain_arc);
+
+    // Build task
+    let task = runtime::AgentTask {
+        id: format!("{:016x}", rand::random::<u64>()),
+        instruction: instruction.clone(),
+        domain,
+        tier,
+        agent_id: None,
+        context: None,
+        max_tokens: Some(max_tokens),
+        temperature: None,
+    };
+
+    // Get agents
+    let available_agents: Vec<_> = agents::generate_strategic_agents()
+        .into_iter()
+        .chain(
+            agents::AgentDomain::all()
+                .iter()
+                .flat_map(|d| agents::generate_tactical_agents(*d))
+        )
+        .collect();
+
+    println!("=== Apophy Sovereign — Agent Execution ===\n");
+    println!("Task: {}\n", instruction);
+
+    let result = rt.execute(&task, &available_agents);
+
+    println!("Agent:    {} ({})", result.agent_name, result.domain);
+    println!("Tier:     {}", result.tier);
+    println!("Status:   {:?}", result.status);
+    println!("Verified: {}", result.verified);
+    println!("Latency:  {}ms", result.trace.latency_ms);
+    println!("Tokens:   {} in + {} out", result.trace.input_tokens, result.trace.output_tokens);
+
+    if !result.verification_details.is_empty() {
+        println!("\nVerification Gates:");
+        for gate in &result.verification_details {
+            let icon = if gate.passed { "PASS" } else { "FAIL" };
+            println!("  [{}] {}: {}", icon, gate.gate_name, gate.details);
+        }
+    }
+
+    println!("\n--- Response ---");
+    println!("{}", result.response);
+
+    if let Some(ref err) = result.error {
+        println!("\n--- Error ---");
+        println!("{}", err);
+    }
+
+    println!("\n--- JSON ---");
+    println!("{}", serde_json::to_string_pretty(&result)?);
+
     Ok(())
 }
 
