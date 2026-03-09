@@ -1,0 +1,17 @@
+[package]
+name = "apophy-pineal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Creuset 4 - Non-deterministic intuition and metaphysical resonance"
+
+[dependencies]
+apophy-crypto = { path = "../apophy-crypto" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+rand = { workspace = true }
+sha2 = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }

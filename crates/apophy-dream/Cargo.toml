@@ -1,0 +1,15 @@
+[package]
+name = "apophy-dream"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Creuset 2 - Temporal dilation and emotional processing for sovereign AI"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }

@@ -1,0 +1,16 @@
+[package]
+name = "apophy-resonance"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Vibration detector - measures alignment between input and identity"
+
+[dependencies]
+apophy-pineal = { path = "../apophy-pineal" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+sha2 = { workspace = true }

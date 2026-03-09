@@ -1,0 +1,72 @@
+version: "3.9"
+
+services:
+  apophy-sovereign:
+    build: .
+    container_name: apophy-sovereign
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config:/app/config:ro
+      - sovereign-data:/app/data
+      - sovereign-models:/app/models
+      - sovereign-keys:/app/keys
+    environment:
+      - RUST_LOG=apophy_sovereign=info
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    networks:
+      - sovereign
+
+  # Self-hosted git — open source, sovereign code hosting
+  gitea:
+    image: gitea/gitea:latest
+    container_name: apophy-gitea
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - GITEA__database__DB_TYPE=sqlite3
+      - GITEA__server__DOMAIN=git.iagenticflow.org
+      - GITEA__server__ROOT_URL=https://git.iagenticflow.org
+      - GITEA__server__SSH_DOMAIN=git.iagenticflow.org
+      - GITEA__server__SSH_PORT=2222
+    volumes:
+      - gitea-data:/data
+    ports:
+      - "3000:3000"
+      - "2222:22"
+    restart: unless-stopped
+    networks:
+      - sovereign
+
+  # Cloudflare Tunnel — zero-trust exposure, no open ports
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: apophy-tunnel
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CF_TUNNEL_TOKEN}
+    restart: unless-stopped
+    depends_on:
+      - apophy-sovereign
+      - gitea
+    networks:
+      - sovereign
+
+volumes:
+  sovereign-data:
+  sovereign-models:
+  sovereign-keys:
+  gitea-data:
+
+networks:
+  sovereign:
+    driver: bridge
