@@ -1,0 +1,164 @@
+# Apophy Sovereign - Configuration
+# Zero-dependency sovereign AI infrastructure
+
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[hardware]
+auto_detect = true
+# force_backend = "cuda"  # Override auto-detection
+max_memory_percent = 90
+
+[chat]
+enable_e2e = true
+max_group_size = 10000
+auto_destroy_days = 30
+max_message_size_kb = 1024
+
+[ai]
+model_path = "models/default.gguf"
+model_name = "qwen-3.5-coder"
+max_tokens = 4096
+temperature = 0.7
+context_length = 4096
+
+[security]
+encryption = "chacha20poly1305"
+key_rotation_days = 90
+audit_log = true
+# tls_cert = "/path/to/cert.pem"
+# tls_key = "/path/to/key.pem"
+
+[database]
+path = "data/sovereign.db"
+
+# === Infrastructure Integration ===
+# Self-financing ecosystem: Skool + AvatarVers + iAgenticFlow + Infomaniak + Gitea + Cloudflare
+
+[infra]
+enabled = true
+
+[infra.skool]
+enabled = true
+base_url = "https://www.skool.com"
+community_slug = "avatarvers"
+# webhook_secret = "sk_your_webhook_secret"
+
+[infra.avatarvers]
+enabled = true
+base_url = "https://avatarvers.com"
+
+[infra.agenticflow]
+enabled = true
+base_url = "https://iagenticflow.org"
+
+[infra.infomaniak]
+enabled = true
+base_url = "https://api.infomaniak.com"
+# api_key_env = "INFOMANIAK_API_KEY"
+
+[infra.email]
+enabled = true
+smtp_host = "mail.infomaniak.com"
+smtp_port = 587
+from_address = "agent@iagenticflow.org"
+from_name = "Apophy Sovereign"
+use_tls = true
+
+[infra.gitea]
+enabled = true
+base_url = "http://localhost:3000"
+ssh_port = 2222
+domain = "git.iagenticflow.org"
+
+[infra.cloudflare]
+enabled = true
+tunnel_name = "apophy-sovereign"
+# tunnel_token_env = "CF_TUNNEL_TOKEN"
+
+# === Agent Fleet — Divine Synarchy ===
+# 3-tier autonomous agent army: Strategic (9), Tactical (~101), Operational (~2720)
+
+[fleet]
+enabled = true
+synarchy_mode = "divine"
+max_agents = 3000
+auto_spawn = true
+domains_enabled = ["startups", "tech", "support", "sales", "hr", "marketing", "ecommerce", "pm", "legal"]
+
+[[infra.cloudflare.routes]]
+hostname = "api.iagenticflow.org"
+service = "http://localhost:8080"
+
+[[infra.cloudflare.routes]]
+hostname = "iagenticflow.org"
+service = "http://localhost:8080"
+
+[[infra.cloudflare.routes]]
+hostname = "git.iagenticflow.org"
+service = "http://localhost:3000"
+
+[[infra.cloudflare.routes]]
+hostname = "avatarvers.com"
+service = "http://localhost:8080"
+
+# === Paradise — Agent Dream Environment ===
+# Content-addressed, self-sustaining, neutral-fiber ecosystem
+
+[paradise]
+enabled = true
+name = "Apophy Paradise"
+
+[paradise.fiber]
+strategy = "adaptive"
+max_share = 0.15
+rebalance_interval_secs = 30
+
+[paradise.autodev]
+enabled = true
+repo_url = "http://localhost:3000/apophy/sovereign"
+branch = "main"
+auto_build = true
+auto_test = true
+auto_deploy = true
+auto_doc = true
+auto_finetune = true
+health_interval_secs = 60
+auto_recover = true
+max_recover_attempts = 3
+
+[paradise.autodev.commands]
+build = "cargo build --workspace --release"
+test = "cargo test --workspace"
+lint = "cargo clippy --workspace -- -D warnings"
+doc = "node prime.js --doctor"
+deploy = "docker compose up -d --build"
+health_url = "http://localhost:8080/health"
+finetune = "python tools/finetune/trainer.py pipeline"
+
+[[paradise.autodev.targets]]
+name = "local-docker"
+type = "docker"
+url = "unix:///var/run/docker.sock"
+enabled = true
+
+[[paradise.autodev.targets]]
+name = "gitea"
+type = "gitea"
+url = "http://localhost:3000"
+enabled = true
+
+[paradise.datasets]
+# Auto-collect from AZR self-play
+auto_collect = true
+# Export format for fine-tuning
+export_format = "jsonl"
+# Storage directory
+storage_dir = "data/datasets"
+
+[paradise.hash_registry]
+# Content-addressed verification
+enabled = true
+# Storage for hash entries
+storage_dir = "data/hashes"

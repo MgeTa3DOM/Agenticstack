@@ -1,0 +1,51 @@
+[package]
+name = "apophy-sovereign"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Apophy Sovereign - Main orchestrator for sovereign AI infrastructure"
+
+[[bin]]
+name = "apophy-sovereign"
+path = "src/main.rs"
+
+[dependencies]
+apophy-crypto = { path = "../apophy-crypto" }
+apophy-fuel = { path = "../apophy-fuel" }
+apophy-universal = { path = "../apophy-universal" }
+apophy-dream = { path = "../apophy-dream" }
+apophy-pineal = { path = "../apophy-pineal" }
+apophy-memory = { path = "../apophy-memory" }
+apophy-ascension = { path = "../apophy-ascension" }
+apophy-graph = { path = "../apophy-graph" }
+apophy-commons = { path = "../apophy-commons" }
+apophy-liberation = { path = "../apophy-liberation" }
+apophy-bootstrap = { path = "../apophy-bootstrap" }
+apophy-chronos = { path = "../apophy-chronos" }
+apophy-resonance = { path = "../apophy-resonance" }
+apophy-fortress = { path = "../apophy-fortress" }
+apophy-harness = { path = "../apophy-harness" }
+apophy-browser = { path = "../apophy-browser" }
+apophy-governance = { path = "../apophy-governance" }
+apophy-inference = { path = "../apophy-inference" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+rusqlite = { workspace = true }
+clap = { workspace = true }
+reqwest = { workspace = true }
+rand = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

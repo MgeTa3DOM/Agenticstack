@@ -1,0 +1,13 @@
+[package]
+name = "apophy-universal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Universal hardware abstraction - NVIDIA/AMD/Intel/Apple/CPU auto-detection and optimization"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
