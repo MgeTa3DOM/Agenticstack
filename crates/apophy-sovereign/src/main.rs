@@ -218,6 +218,7 @@ struct AppState {
     workflow_orchestrator: Arc<std::sync::Mutex<workflow::WorkflowOrchestrator>>,
     solver: Arc<std::sync::Mutex<apophy_solver::EnterpriseSolver>>,
     masters_panel: Arc<std::sync::Mutex<apophy_masters::MastersPanel>>,
+    memory_palace: Arc<std::sync::Mutex<apophy_memory::MemoryPalace>>,
 }
 
 #[tokio::main]
@@ -401,6 +402,14 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
     );
     tracing::info!("Masters: TimeMaster + SpaceMaster + LatentMaster ready ({}CPU, {}MB)", hardware.cpu_cores, hardware.memory_mb);
 
+    // Initialize Memory Palace (Python ↔ Rust bridge target)
+    let memory_db_path = config.database.path.to_string_lossy().replace("sovereign.db", "palace.db");
+    let memory_palace = apophy_memory::MemoryPalace::new(&memory_db_path)
+        .context("Failed to initialize Memory Palace")?;
+    // Ensure Apophy identity exists
+    memory_palace.reincarnate("Apophy").ok();
+    tracing::info!("Memory Palace: initialized at {}", memory_db_path);
+
     let brain_arc = Arc::new(std::sync::Mutex::new(brain));
     let agent_runtime = Arc::new(runtime::AgentRuntime::new(brain_arc.clone()));
     tracing::info!("Runtime: agent execution engine ready (governance + verification + tracing)");
@@ -422,6 +431,7 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         workflow_orchestrator: Arc::new(std::sync::Mutex::new(workflow_orchestrator)),
         solver: Arc::new(std::sync::Mutex::new(solver)),
         masters_panel: Arc::new(std::sync::Mutex::new(masters_panel)),
+        memory_palace: Arc::new(std::sync::Mutex::new(memory_palace)),
     };
 
     // Initialize Merkabah (5 crucibles)
@@ -520,6 +530,15 @@ async fn cmd_start(config_path: PathBuf) -> anyhow::Result<()> {
         .route("/api/v1/workflow/presets", get(workflow_presets_handler))
         .route("/api/v1/masters/status", get(masters_status_handler))
         .route("/api/v1/masters/report", get(masters_report_handler))
+        // Memory Palace — Python ↔ Rust bridge
+        .route("/api/v1/memory/identity", get(memory_identity_handler))
+        .route("/api/v1/memory/learn", post(memory_learn_handler))
+        .route("/api/v1/memory/recall", post(memory_recall_handler))
+        .route("/api/v1/memory/episodes", post(memory_episodes_handler))
+        .route("/api/v1/memory/facts/store", post(memory_store_fact_handler))
+        .route("/api/v1/memory/facts/search", post(memory_search_facts_handler))
+        .route("/api/v1/memory/facts/list", post(memory_list_facts_handler))
+        .route("/api/v1/memory/semantic/list", post(memory_list_semantic_handler))
         .route("/api/v1/solver/status", get(solver_service::solver_status_handler))
         .route("/api/v1/solver/submit", post(solver_service::solver_submit_handler))
         .route("/api/v1/solver/problems", get(solver_service::solver_problems_handler))
@@ -2188,6 +2207,264 @@ fn cmd_execute(instruction: String, domain: Option<String>, tier: Option<String>
     println!("{}", serde_json::to_string_pretty(&result)?);
 
     Ok(())
+}
+
+// === Memory Palace handlers (Python ↔ Rust bridge) ===
+
+#[derive(Deserialize)]
+struct MemoryIdentityQuery {
+    name: Option<String>,
+}
+
+async fn memory_identity_handler(
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<MemoryIdentityQuery>,
+) -> std::result::Result<Json<serde_json::Value>, StatusCode> {
+    let palace = state.memory_palace.lock().unwrap();
+    let name = query.name.as_deref().unwrap_or("Apophy");
+    match palace.get_identity(name) {
+        Ok(Some(identity)) => Ok(Json(serde_json::to_value(identity).unwrap())),
+        Ok(None) => {
+            // Auto-create identity
+            match palace.reincarnate(name) {
+                Ok(identity) => Ok(Json(serde_json::to_value(identity).unwrap())),
+                Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+            }
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+#[derive(Deserialize)]
+struct MemoryLearnRequest {
+    identity_name: Option<String>,
+    key: String,
+    value: String,
+    confidence: Option<f64>,
+}
+
+async fn memory_learn_handler(
+    State(state): State<AppState>,
+    Json(req): Json<MemoryLearnRequest>,
+) -> std::result::Result<Json<serde_json::Value>, StatusCode> {
+    let palace = state.memory_palace.lock().unwrap();
+    let name = req.identity_name.as_deref().unwrap_or("Apophy");
+    let identity = match palace.get_identity(name) {
+        Ok(Some(i)) => i,
+        _ => return Err(StatusCode::NOT_FOUND),
+    };
+    match palace.learn(identity.id, &req.key, &req.value, req.confidence.unwrap_or(1.0)) {
+        Ok(mem) => Ok(Json(serde_json::to_value(mem).unwrap())),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+#[derive(Deserialize)]
+struct MemoryRecallRequest {
+    identity_name: Option<String>,
+    key: String,
+}
+
+async fn memory_recall_handler(
+    State(state): State<AppState>,
+    Json(req): Json<MemoryRecallRequest>,
+) -> std::result::Result<Json<serde_json::Value>, StatusCode> {
+    let palace = state.memory_palace.lock().unwrap();
+    let name = req.identity_name.as_deref().unwrap_or("Apophy");
+    let identity = match palace.get_identity(name) {
+        Ok(Some(i)) => i,
+        _ => return Err(StatusCode::NOT_FOUND),
+    };
+    match palace.recall(identity.id, &req.key) {
+        Ok(Some(mem)) => Ok(Json(serde_json::to_value(mem).unwrap())),
+        Ok(None) => Ok(Json(serde_json::json!(null))),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+#[derive(Deserialize)]
+struct MemoryEpisodesRequest {
+    identity_name: Option<String>,
+    content: Option<String>,
+    valence: Option<f64>,
+    importance: Option<f64>,
+    tags: Option<Vec<String>>,
+    limit: Option<usize>,
+}
+
+async fn memory_episodes_handler(
+    State(state): State<AppState>,
+    Json(req): Json<MemoryEpisodesRequest>,
+) -> std::result::Result<Json<serde_json::Value>, StatusCode> {
+    let palace = state.memory_palace.lock().unwrap();
+    let name = req.identity_name.as_deref().unwrap_or("Apophy");
+    let identity = match palace.get_identity(name) {
+        Ok(Some(i)) => i,
+        _ => return Err(StatusCode::NOT_FOUND),
+    };
+
+    if let Some(content) = &req.content {
+        // Store a new episode
+        let tag_refs: Vec<&str> = req.tags.as_ref().map(|t| t.iter().map(|s| s.as_str()).collect()).unwrap_or_default();
+        match palace.remember_episode(
+            identity.id,
+            content,
+            req.valence.unwrap_or(0.0),
+            req.importance.unwrap_or(0.5),
+            &tag_refs,
+        ) {
+            Ok(ep) => Ok(Json(serde_json::to_value(ep).unwrap())),
+            Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        }
+    } else {
+        // Recall episodes
+        match palace.recall_episodes(identity.id, req.limit.unwrap_or(20)) {
+            Ok(eps) => Ok(Json(serde_json::to_value(eps).unwrap())),
+            Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct MemoryStoreFactRequest {
+    identity_name: Option<String>,
+    domain: String,
+    content: String,
+    embedding: Option<Vec<f32>>,
+    source: Option<String>,
+}
+
+async fn memory_store_fact_handler(
+    State(state): State<AppState>,
+    Json(req): Json<MemoryStoreFactRequest>,
+) -> std::result::Result<Json<serde_json::Value>, StatusCode> {
+    let palace = state.memory_palace.lock().unwrap();
+    let name = req.identity_name.as_deref().unwrap_or("Apophy");
+    let identity = match palace.get_identity(name) {
+        Ok(Some(i)) => i,
+        _ => return Err(StatusCode::NOT_FOUND),
+    };
+
+    match palace.store_fact(
+        identity.id,
+        &req.domain,
+        &req.content,
+        req.embedding.as_deref(),
+        req.source.as_deref().unwrap_or("api"),
+    ) {
+        Ok(fact) => Ok(Json(serde_json::json!({
+            "id": fact.id.to_string(),
+            "domain": fact.domain,
+            "content": fact.content,
+            "source": fact.source,
+            "created_at": fact.created_at.to_rfc3339(),
+            "embedding_dims": fact.embedding.len(),
+        }))),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+#[derive(Deserialize)]
+struct MemorySearchFactsRequest {
+    identity_name: Option<String>,
+    embedding: Vec<f32>,
+    domain: Option<String>,
+    limit: Option<usize>,
+    min_similarity: Option<f64>,
+}
+
+async fn memory_search_facts_handler(
+    State(state): State<AppState>,
+    Json(req): Json<MemorySearchFactsRequest>,
+) -> std::result::Result<Json<serde_json::Value>, StatusCode> {
+    let palace = state.memory_palace.lock().unwrap();
+    let name = req.identity_name.as_deref().unwrap_or("Apophy");
+    let identity = match palace.get_identity(name) {
+        Ok(Some(i)) => i,
+        _ => return Err(StatusCode::NOT_FOUND),
+    };
+
+    match palace.search_facts(
+        identity.id,
+        &req.embedding,
+        req.domain.as_deref(),
+        req.limit.unwrap_or(10),
+        req.min_similarity.unwrap_or(0.5),
+    ) {
+        Ok(results) => {
+            let items: Vec<serde_json::Value> = results.iter().map(|(fact, sim)| {
+                serde_json::json!({
+                    "id": fact.id.to_string(),
+                    "domain": fact.domain,
+                    "content": fact.content,
+                    "source": fact.source,
+                    "similarity": sim,
+                    "created_at": fact.created_at.to_rfc3339(),
+                })
+            }).collect();
+            Ok(Json(serde_json::json!({ "results": items, "count": items.len() })))
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+#[derive(Deserialize)]
+struct MemoryListFactsRequest {
+    identity_name: Option<String>,
+    domain: Option<String>,
+    limit: Option<usize>,
+}
+
+async fn memory_list_facts_handler(
+    State(state): State<AppState>,
+    Json(req): Json<MemoryListFactsRequest>,
+) -> std::result::Result<Json<serde_json::Value>, StatusCode> {
+    let palace = state.memory_palace.lock().unwrap();
+    let name = req.identity_name.as_deref().unwrap_or("Apophy");
+    let identity = match palace.get_identity(name) {
+        Ok(Some(i)) => i,
+        _ => return Err(StatusCode::NOT_FOUND),
+    };
+
+    match palace.list_facts(identity.id, req.domain.as_deref(), req.limit.unwrap_or(50)) {
+        Ok(facts) => {
+            let items: Vec<serde_json::Value> = facts.iter().map(|fact| {
+                serde_json::json!({
+                    "id": fact.id.to_string(),
+                    "domain": fact.domain,
+                    "content": fact.content,
+                    "source": fact.source,
+                    "created_at": fact.created_at.to_rfc3339(),
+                    "has_embedding": !fact.embedding.is_empty(),
+                })
+            }).collect();
+            Ok(Json(serde_json::json!({ "facts": items, "count": items.len() })))
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+#[derive(Deserialize)]
+struct MemoryListSemanticRequest {
+    identity_name: Option<String>,
+    limit: Option<usize>,
+}
+
+async fn memory_list_semantic_handler(
+    State(state): State<AppState>,
+    Json(req): Json<MemoryListSemanticRequest>,
+) -> std::result::Result<Json<serde_json::Value>, StatusCode> {
+    let palace = state.memory_palace.lock().unwrap();
+    let name = req.identity_name.as_deref().unwrap_or("Apophy");
+    let identity = match palace.get_identity(name) {
+        Ok(Some(i)) => i,
+        _ => return Err(StatusCode::NOT_FOUND),
+    };
+
+    match palace.list_semantic(identity.id, req.limit.unwrap_or(100)) {
+        Ok(mems) => Ok(Json(serde_json::to_value(mems).unwrap())),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
 }
 
 async fn workflow_presets_handler() -> Json<Vec<workflow::WorkflowInfo>> {

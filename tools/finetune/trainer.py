@@ -32,6 +32,9 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
+# Add bridge to path for memory client
+sys.path.insert(0, str(Path(__file__).parent.parent / "bridge"))
+
 
 # === AZR Self-Play Dataset Generator ===
 
@@ -388,6 +391,123 @@ def specialize_gemma3(
     print(f"Output: {output_dir}")
 
 
+# === Memory Bridge — Python ↔ Rust Sync ===
+
+def memory_push(
+    api_url: str = "http://localhost:8080",
+    dataset_path: str = "data/azr_dataset.jsonl",
+    domain: str = "reasoning",
+    identity: str = "Apophy",
+):
+    """Push training data FROM JSONL dataset INTO the Rust Memory Palace.
+
+    Each verified training example becomes a semantic fact in the palace,
+    creating a persistent knowledge base that survives restarts.
+    """
+    from apophy_client import ApophyMemoryClient
+
+    client = ApophyMemoryClient(api_url, identity)
+
+    if not client.is_alive():
+        print(f"[ERROR] Sovereign server not reachable at {api_url}")
+        print("  Start it with: apophy-sovereign start --config config/sovereign.toml")
+        sys.exit(1)
+
+    print(f"=== Memory Push: JSONL → Rust Palace ===")
+    print(f"Dataset: {dataset_path}")
+    print(f"Domain:  {domain}")
+    print(f"Server:  {api_url}")
+
+    facts = []
+    with open(dataset_path) as f:
+        for line in f:
+            ex = json.loads(line.strip())
+            # Only push verified examples
+            if ex.get("verified", True):
+                content = f"Q: {ex['instruction']}\nA: {ex['output']}"
+                facts.append(content)
+
+    print(f"  Found {len(facts)} verified examples")
+
+    result = client.sync_training_context(domain=domain, facts=facts, source="trainer-push")
+    print(f"  Stored: {result['stored']}, Errors: {result['errors']}")
+
+    # Record the push as an episodic memory
+    client.remember(
+        f"Training push: {result['stored']} {domain} facts from {dataset_path}",
+        valence=0.7,
+        importance=0.8,
+        tags=["training", "push", domain],
+    )
+
+    print(f"\nPush complete. Memory Palace now contains these facts.")
+
+
+def memory_pull(
+    api_url: str = "http://localhost:8080",
+    output_path: str = "data/memory_export.jsonl",
+    domain: str | None = None,
+    identity: str = "Apophy",
+):
+    """Pull knowledge FROM the Rust Memory Palace INTO a JSONL dataset.
+
+    Exports semantic beliefs, episodic memories, and semantic facts
+    into a unified training format for fine-tuning.
+    """
+    from apophy_client import ApophyMemoryClient
+
+    client = ApophyMemoryClient(api_url, identity)
+
+    if not client.is_alive():
+        print(f"[ERROR] Sovereign server not reachable at {api_url}")
+        sys.exit(1)
+
+    print(f"=== Memory Pull: Rust Palace → JSONL ===")
+    print(f"Output:  {output_path}")
+    print(f"Domain:  {domain or 'all'}")
+    print(f"Server:  {api_url}")
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+    entries = client.export_training_data(
+        domain=domain,
+        output_path=output_path,
+    )
+
+    print(f"\nExported {len(entries)} training entries to {output_path}")
+    print(f"  Beliefs:  {sum(1 for e in entries if e['domain'] == 'beliefs')}")
+    print(f"  Facts:    {sum(1 for e in entries if e['domain'] not in ('beliefs', 'episodic'))}")
+    print(f"  Episodes: {sum(1 for e in entries if e['domain'] == 'episodic')}")
+
+
+def memory_status(
+    api_url: str = "http://localhost:8080",
+    identity: str = "Apophy",
+):
+    """Show Memory Palace status and statistics."""
+    from apophy_client import ApophyMemoryClient
+
+    client = ApophyMemoryClient(api_url, identity)
+
+    if not client.is_alive():
+        print(f"[ERROR] Sovereign server not reachable at {api_url}")
+        sys.exit(1)
+
+    identity_info = client.get_identity()
+    beliefs = client.list_semantic(limit=1000)
+    facts = client.list_facts(limit=1000)
+    episodes = client.episodes(limit=1000)
+
+    print(f"=== Memory Palace Status ===")
+    if identity_info:
+        print(f"  Identity:     {identity_info.get('name', '?')}")
+        print(f"  Incarnation:  {identity_info.get('incarnation', 0)}")
+        print(f"  Created:      {identity_info.get('created_at', '?')}")
+    print(f"  Beliefs:      {len(beliefs) if isinstance(beliefs, list) else 0}")
+    print(f"  Facts:        {facts.get('count', 0) if isinstance(facts, dict) else 0}")
+    print(f"  Episodes:     {len(episodes) if isinstance(episodes, list) else 0}")
+
+
 # === CLI ===
 
 def main():
@@ -440,6 +560,23 @@ def main():
     spec.add_argument("--output", default="models/specialized/")
     spec.add_argument("--max-agents", type=int, default=100)
 
+    # Memory Bridge commands (Python ↔ Rust)
+    push = subparsers.add_parser("memory-push", help="Push JSONL training data → Rust Memory Palace")
+    push.add_argument("--api-url", default="http://localhost:8080")
+    push.add_argument("--dataset", default="data/azr_dataset.jsonl")
+    push.add_argument("--domain", default="reasoning")
+    push.add_argument("--identity", default="Apophy")
+
+    pull = subparsers.add_parser("memory-pull", help="Pull Rust Memory Palace → JSONL training data")
+    pull.add_argument("--api-url", default="http://localhost:8080")
+    pull.add_argument("--output", default="data/memory_export.jsonl")
+    pull.add_argument("--domain", default=None)
+    pull.add_argument("--identity", default="Apophy")
+
+    mstat = subparsers.add_parser("memory-status", help="Show Memory Palace status")
+    mstat.add_argument("--api-url", default="http://localhost:8080")
+    mstat.add_argument("--identity", default="Apophy")
+
     args = parser.parse_args()
 
     if args.command == "generate":
@@ -485,6 +622,25 @@ def main():
             base_model=args.base_model,
             output=args.output,
             domain=args.domain,
+        )
+    elif args.command == "memory-push":
+        memory_push(
+            api_url=args.api_url,
+            dataset_path=args.dataset,
+            domain=args.domain,
+            identity=args.identity,
+        )
+    elif args.command == "memory-pull":
+        memory_pull(
+            api_url=args.api_url,
+            output_path=args.output,
+            domain=args.domain,
+            identity=args.identity,
+        )
+    elif args.command == "memory-status":
+        memory_status(
+            api_url=args.api_url,
+            identity=args.identity,
         )
     else:
         parser.print_help()
