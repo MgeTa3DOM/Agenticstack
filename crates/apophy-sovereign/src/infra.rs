@@ -366,3 +366,21 @@ pub fn process_skool_contribution(payload: &SkoolWebhookPayload) -> (bool, f64) 
         _ => (false, 0.0),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_contribution_receipt_email() {
+        let email = contribution_receipt_email("Alice", 10.5, "Rust Basics");
+
+        assert_eq!(email.to, "");
+        assert_eq!(email.subject, "Contribution enregistree - 10.50 tokens");
+
+        assert!(email.body.contains("Bonjour Alice"));
+        assert!(email.body.contains("Cours: Rust Basics"));
+        assert!(email.body.contains("Tokens credites: 10.50"));
+        assert!(email.body.contains("Type: Knowledge"));
+    }
+}

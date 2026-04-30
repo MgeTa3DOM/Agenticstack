@@ -1907,7 +1907,7 @@ fn cmd_solve(title: String, description: String, domain_str: String, severity_st
 
     println!("\n=== Diagnosis ===");
     println!("  Root Cause  : {}", report.diagnosis.root_cause);
-    println!("  Category    : {}", report.diagnosis.root_cause_category);
+    println!("  Category    : {}", report.diagnosis.category);
     println!("  Confidence  : {:.0}%", report.diagnosis.confidence * 100.0);
     if !report.diagnosis.contributing_factors.is_empty() {
         println!("  Factors     :");
