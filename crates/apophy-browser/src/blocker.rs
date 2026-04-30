@@ -7,7 +7,7 @@
 //! Rules are compiled into an efficient state machine for O(1) lookup.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -85,8 +85,8 @@ pub enum ResourceType {
 
 /// The Content Blocker — fast pattern-matching engine
 pub struct ContentBlocker {
-    /// Domain-based block rules (fast HashSet lookup)
-    blocked_domains: HashSet<String>,
+    /// Domain-based block rules (fast HashMap lookup)
+    blocked_domains: HashMap<String, BlockCategory>,
     /// URL pattern rules
     rules: Vec<BlockRule>,
     /// Exception domains (never block)
@@ -99,7 +99,7 @@ pub struct ContentBlocker {
 impl ContentBlocker {
     pub fn new() -> Self {
         Self {
-            blocked_domains: HashSet::new(),
+            blocked_domains: HashMap::new(),
             rules: Vec::new(),
             exception_domains: HashSet::new(),
             total_blocked: 0,
@@ -167,7 +167,7 @@ impl ContentBlocker {
 
     /// Block a specific domain
     pub fn block_domain(&mut self, domain: &str, category: BlockCategory) {
-        self.blocked_domains.insert(domain.to_string());
+        self.blocked_domains.insert(domain.to_string(), category.clone());
         self.rules.push(BlockRule {
             pattern: domain.to_string(),
             category,
@@ -230,13 +230,7 @@ impl ContentBlocker {
     }
 
     fn find_domain_match(&self, domain: &str) -> Option<(String, BlockCategory)> {
-        if self.blocked_domains.contains(domain) {
-            self.rules.iter()
-                .find(|r| r.pattern == domain)
-                .map(|r| (r.pattern.clone(), r.category.clone()))
-        } else {
-            None
-        }
+        self.blocked_domains.get(domain).map(|cat| (domain.to_string(), cat.clone()))
     }
 
     fn extract_domain(url: &str) -> Option<String> {
