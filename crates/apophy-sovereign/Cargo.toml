@@ -49,4 +49,10 @@ uuid = { workspace = true }
 sha2 = { workspace = true }
 
 [dev-dependencies]
+criterion = "0.8.2"
+rusqlite.workspace = true
 tempfile = { workspace = true }
+
+[[bench]]
+name = "db_bench"
+harness = false
