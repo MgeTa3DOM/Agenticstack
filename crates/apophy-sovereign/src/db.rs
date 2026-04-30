@@ -282,14 +282,18 @@ impl SovereignDb {
     /// Get fleet counts by tier
     #[allow(dead_code)]
     pub fn fleet_counts(&self) -> Result<(u64, u64, u64)> {
-        let strategic: u64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM agent_fleet WHERE tier = 'strategic'", [], |row| row.get(0),
-        )?;
-        let tactical: u64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM agent_fleet WHERE tier = 'tactical'", [], |row| row.get(0),
-        )?;
-        let operational: u64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM agent_fleet WHERE tier = 'operational'", [], |row| row.get(0),
+        let (strategic, tactical, operational) = self.conn.query_row(
+            "SELECT
+                SUM(CASE WHEN tier = 'strategic' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN tier = 'tactical' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN tier = 'operational' THEN 1 ELSE 0 END)
+             FROM agent_fleet",
+            [],
+            |row| Ok((
+                row.get::<_, Option<u64>>(0)?.unwrap_or(0),
+                row.get::<_, Option<u64>>(1)?.unwrap_or(0),
+                row.get::<_, Option<u64>>(2)?.unwrap_or(0),
+            )),
         )?;
         Ok((strategic, tactical, operational))
     }
